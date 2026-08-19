@@ -9,6 +9,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadYamlLib } from './check-spec-suite.mjs'
+import { generateContractBundle } from './generate-contract-bundle.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SKILL_ROOT = path.join(HERE, '..')
@@ -291,4 +292,28 @@ test('未解决事实跨重复任务仍返回 unresolved，不产生默认值', 
   assert.equal(fs.readFileSync(unresolvedPath, 'utf8'), unresolvedBytes)
   assert.equal(fs.readFileSync(dictionaryPath, 'utf8'), dictionaryBytes)
   assert.doesNotMatch(dictionaryBytes, /retry_count/)
+})
+
+test('发布的 L0 example adapter 与 bundle 是 canonical inputs 的当前字节', async () => {
+  const source = path.join(SKILL_ROOT, 'templates', 'L0', 'example')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-example-'))
+  fs.cpSync(source, root, { recursive: true })
+  const config = path.join(root, 'spec-suite.config.json')
+  const tracked = [
+    path.join(root, 'CLAUDE.md'),
+    path.join(root, 'generated', 'contract-bundle.json'),
+    path.join(root, 'generated', 'manifest.json'),
+  ]
+  const before = tracked.map((file) => fs.readFileSync(file))
+
+  const fixed = runCli('check-spec-suite.mjs', [
+    '--specs-root', root,
+    '--config', config,
+    '--write-generated-regions',
+    '--quiet',
+  ], process.cwd())
+  assert.equal(fixed.status, 0, fixed.stderr || fixed.stdout)
+  await generateContractBundle({ specsRoot: root, config })
+
+  tracked.forEach((file, index) => assert.deepEqual(fs.readFileSync(file), before[index]))
 })

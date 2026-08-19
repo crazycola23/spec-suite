@@ -1,5 +1,7 @@
 # spec-suite
 
+[![test](https://github.com/crazycola23/spec-suite/actions/workflows/test.yml/badge.svg)](https://github.com/crazycola23/spec-suite/actions/workflows/test.yml)
+
 一个面向多 Agent、多仓库协作的可机器检查规格治理 skill。它的核心不是生成更多文档，而是让三条不变量可执行：
 
 - **Unknown stays unknown**：没有权威依据的事实被持久化为 unresolved，不会在下一轮上下文里变成默认值。
