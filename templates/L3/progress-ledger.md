@@ -56,4 +56,4 @@
 | specs | `<hash>`（<一句话>） |
 | <server> | `<hash>`（<一句话>） |
 
-<commit 描述用什么语言、是否允许 push，按 CLAUDE.md N-11 与仓库协议执行 —— 本表只记账，不授权。>
+<commit 描述用什么语言、是否允许 push，按当前平台 Agent Entry adapter 与仓库协议执行 —— 本表只记账，不授权。>

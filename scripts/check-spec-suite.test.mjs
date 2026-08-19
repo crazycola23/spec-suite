@@ -912,7 +912,7 @@ test('A：templates/L0/example 跑完整 run() → 0 error', async () => {
 
 // SKILL.md §0 与 SCHEMA.md §5.2 声明"编号目录只是门风，换 flat 布局机制一样成立"。
 // 这条测试就是那句声明的断言（铁律 3：每条声明配一条断言，别只在文档里断言）。
-// 复用 example 的 CLAUDE.md 与 dictionary，只把路径换成 flat —— 这样测的是布局，
+// 复用 example 的 Agent Entry adapter、canonical source 与 dictionary，只把路径换成 flat —— 这样测的是布局，
 // 不是把 example 已经覆盖过的 schema / 禁令覆盖再测一遍。
 test('flat 布局（无编号目录）跑完整 run() → 0 error', async () => {
   const ex = path.join(HERE, '..', 'templates', 'L0', 'example')
@@ -921,6 +921,7 @@ test('flat 布局（无编号目录）跑完整 run() → 0 error', async () => 
   const root = buildFixture({
     'CLAUDE.md': flatten(fs.readFileSync(path.join(ex, 'CLAUDE.md'), 'utf8')),
     'rules.md': fs.readFileSync(path.join(ex, '10-why', '02-业务规则.md'), 'utf8'),
+    'contracts/agent-entry.yaml': flatten(fs.readFileSync(path.join(ex, 'contracts', 'agent-entry.yaml'), 'utf8')),
     'contracts/dictionary.yaml': flatten(fs.readFileSync(path.join(ex, 'contracts', 'dictionary.yaml'), 'utf8')),
     'gaps.md': '# 规则缺口\n\n<!-- BEGIN GENERATED: gaps -->\n<!-- END GENERATED: gaps -->\n',
     // 追溯矩阵也放在根上，验证 coverageRequirements 的 mustAppearIn 不依赖 50-delivery/
@@ -930,11 +931,16 @@ test('flat 布局（无编号目录）跑完整 run() → 0 error', async () => 
       dictionaries: ['contracts/dictionary.yaml'],
       generatedDir: 'generated',
       claudeMd: 'CLAUDE.md',
+      agentEntry: {
+        source: 'contracts/agent-entry.yaml',
+        adapters: [{ platform: 'claude', path: 'CLAUDE.md', projection: 'agent-entry.common' }],
+      },
       idNamespaces: [
         { prefix: 'BR', pattern: '^BR-[A-Z]+-\\d{3}$', kind: 'rule', definedIn: ['rules.md'] },
         { prefix: 'G', pattern: '^G-\\d{2}$', kind: 'gap', definedIn: ['contracts/dictionary.yaml'] },
+        { prefix: 'N', pattern: '^N-\\d{2}$', kind: 'ban', definedIn: ['CLAUDE.md'] },
       ],
-      projections: { gaps: 'gapTable' },
+      projections: { 'agent-entry.common': 'agentEntryCommon', gaps: 'gapTable' },
       structuredFileGlobs: ['**/*.yaml', '**/*.yml', '**/*.json', '**/*.csv'],
       markdownGlobs: ['**/*.md'],
       excludeFromScan: ['node_modules/**', 'generated/**'],

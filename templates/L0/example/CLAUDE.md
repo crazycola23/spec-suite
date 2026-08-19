@@ -1,63 +1,48 @@
-# example · AI / 开发协作纪律（最小 L0 示例）
+# example · Claude adapter
 
-> 执行面。规格全文是参考材料，本文件是必然进入上下文的那一份。
-
+<!-- BEGIN GENERATED: agent-entry.common -->
 ## 0. 裁决顺序
 
 | 优先级 | 来源 | 冲突时 |
-|:--:|---|---|
-| 1 | `10-why/02-业务规则.md`（`BR-*`） | **唯一业务真相源**，其他与它冲突即缺陷 |
-| 2 | `contracts/dictionary.yaml` | 与真相源冲突 → 改契约 |
+|---:|---|---|
+| 1 | `10-why/02-业务规则.md`（`BR-*`） | 唯一业务真相源；其他内容是待修派生物 |
+| 2 | `contracts/*.yaml` | 与规则冲突就改 canonical contract |
+| 3 | adapter、`generated/`、manifest、consumer copy | 无裁决权；重新生成或同步 |
 
-## 1. 按任务打开哪里
+## 1. 共享禁令
 
-| 你要做的事 | 打开 |
-|---|---|
-| 定某个状态 / 枚举值 | `contracts/dictionary.yaml` |
-| 问"这条规则为什么这样" | `10-why/02-业务规则.md` |
-| 看有哪些未关闭缺口 | `decisions/gaps.md` |
+### N-01 Unknown stays unknown
 
-## 2. 禁令
+没有可解析 authoritative source 的事实不得进入 canonical contract。未知值保持 unresolved；完整模式只登记同一个 `G-*`。
 
-每条禁令的机器强制情况见 §6。没有断言的禁令，三个月后一定已经被违反。
+### N-02 Canonical stays canonical
 
-### N-01 不得发明业务规则
+generated region、bundle、manifest 和 consumer copy 都是派生物，不得手改或反向作为 source。
 
-契约里出现任何在 `10-why/02-业务规则.md` 找不到出处的枚举值 / 状态迁移 / 阈值 / 数量，一律视为缺陷。缺就登记 `G-*`，不要补。
+### N-03 下游只引用 ID
 
-### N-02 不得手写生成区
+下游引用稳定 ID，不复制 canonical 描述。
 
-`.md` 里 `<!-- BEGIN GENERATED -->` 与 `<!-- END GENERATED -->` 之间由 yaml 生成，不许手改。要改改 yaml。
+### N-04 实现选择不得改变业务口径
 
-### N-03 不得复制描述，只许引用 ID
+实现与规则冲突时停止依赖动作并暴露冲突，不在代码里选一个更方便的解释。
 
-写 `BR-MEMBER-001`，不写「成员有生效与已移除两种状态」。复制一次描述，就会漂移一次。
+## 2. 发现未知事实
 
-### N-04 不得在代码里隐式改口径
+停止写默认值 → 查 authoritative source → 能问则问 → 持久化 unresolved → 只继续无关的可逆工作。
 
-实现方案与业务规则冲突时登记为阻塞项并停手，不在代码里选一个"更合理的"解释继续。
-
-### N-11 不得自行 commit / push
-
-除用户明确指示，不执行 commit、push、建分支、打 tag。提交说明用中文。
-
-### N-12 一个概念只允许一种写法
-
-同一概念出现第二种拼写即为缺陷，不论哪种"更好看"。
-
-## 3. 发现规则缺失时
-
-停手 → 在 `contracts/dictionary.yaml` 的 `gaps:` 登记 `G-xx`（含 `protectiveDefault` 与 `rollbackCost`）→ 按保护性默认行为继续。缺口登记不等于阻塞功能。
-
-## 6. 禁令的机器强制情况
-
-<!-- 每条 §2 的禁令都必须在此有一行。checker 检查 5 强制。状态只有 ✅ / ⚠️ 部分 / ⚠️ 技术债。 -->
+## 3. 禁令覆盖
 
 | 禁令 | 强制方式 | 在哪跑 | 状态 |
 |---|---|---|---|
-| N-01 | 字典 `source` 必填且必须解析（检查 1 + 3）。散文无断言 | 规格库 CI | ⚠️ 部分 |
-| N-02 | 生成区逐字节比对（检查 4） | 规格库 CI | ✅ |
-| N-03 | 字典 `label` 值不得出现在结构化文件（检查 6） | 规格库 CI | ✅ |
-| N-04 | 无机器断言 —— 只能人工审查 | PR review | ⚠️ 技术债 |
-| N-11 | 无机器断言 —— 只能人工审查 | PR review | ⚠️ 技术债 |
-| N-12 | 无机器断言 —— 术语只能人工比对 | PR review | ⚠️ 技术债 |
+| N-01 | source 必填、可解析，generator 拒绝 gap/generated | 规格库 CI | ✅ |
+| N-02 | generated region、bundle 与 consumer 字节比对 | 规格库 CI + consumer CI | ✅ |
+| N-03 | 结构化 label copy 检查 | 规格库 CI | ⚠️ 部分 |
+| N-04 | 只能人工审查业务语义是否被隐式改变 | PR review | ⚠️ 技术债 |
+<!-- END GENERATED: agent-entry.common -->
+
+## Claude-specific handwritten region
+
+- Claude Code loads this root file as its adapter.
+- Common discipline changes start in `contracts/agent-entry.yaml`, then rerender this region.
+- Claude-only tool or context rules belong here; shared rules do not.

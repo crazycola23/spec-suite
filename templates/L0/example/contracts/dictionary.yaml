@@ -6,7 +6,6 @@
 meta:
   suite: example
   truthSource: 10-why/02-业务规则.md
-  version: v1
 
 enums:
   - code: MemberStatus
@@ -49,3 +48,10 @@ gaps:
     status: open
     closedBy: null
     closedAt: null
+    provenance:
+      schemaVersion: 1
+      unresolvedFact: invitation_expiry_days
+      sourceSearch: [docs, code]
+      evidence: []
+      blockedAction: do_not_implement_default
+      nextEvidence: product_owner

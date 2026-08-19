@@ -3,7 +3,7 @@
 
   "$meta": {
     "purpose": "一份数据同时喂 Mock（前端）+ 自动化测试 + 原型。任何一方需要新数据，改本文件，不各自造。",
-    "codeSource": "所有状态/枚举值来自 <字典>.yaml。禁止出现中文状态值（CLAUDE.md N-01）",
+    "codeSource": "所有状态/枚举值来自 <字典>.yaml。禁止出现无 source 的状态值（Agent Entry Contract N-01）",
     "fixtureIds": "夹具代号来自 <验收用例文档 §N>，逐一对应",
     "ruleVersion": "<BR vX.Y>",
     "contractVersion": "<1.0>",

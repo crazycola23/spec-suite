@@ -1,11 +1,11 @@
 <!-- 模板：decisions/gaps.md
-     §1 的表格是 contracts/dictionary.yaml 的 gaps: 节点的投影，由 npm run generate 写入。
+     §1 的表格是 contracts/dictionary.yaml 的 gaps: 节点投影，由 npm run fix:generated-regions 写入。
      生成区内不许手改 —— 要改改 yaml。散文区（§2 之后）自由手写。 -->
 
 # 规则缺口台账
 
-> **本文件是规则缺口的唯一台账。** 别处（README、进度文档、切片文档）只许引用本文件名，不许复述未关闭清单 —— 复述一次就会漂移一次。
-> 缺口 ≠ 阻塞。每条缺口都有保护性默认行为，开发继续进行。
+> 本文件是给人的缺口视图；canonical 记录在 `contracts/dictionary.yaml` 的 `gaps:`。别处只引用本文件，不复述未关闭清单。
+> 缺口不必阻塞无关的可逆工作。依赖未知值的动作保持阻塞；只有已获授权、无不可撤销后果的 `protectiveDefault` 才能替代该动作。
 
 ---
 
@@ -20,18 +20,18 @@
 
 ## 2. 按危险程度排序
 
-<手写。只列 open 的，按"猜错的后果"排，不按登记顺序排。
+<手写。只列 open 的，按"错误临时策略的后果"排，不按登记顺序排。
  这一节的作用是让读者知道先解决哪个 —— 数量多的时候按 ID 顺序读没有意义。>
 
-**🔴 猜错会造成不可逆后果**
+**🔴 错误临时策略会造成不可逆后果**
 
 - `<G-xx>`：<后果一句话。例：预留泄漏 → 误熔断 → 业务停摆>
 
-**🟠 猜错会造成数据污染，可清洗但有成本**
+**🟠 错误临时策略会造成数据污染，可清洗但有成本**
 
 - `<G-xx>`：<后果一句话>
 
-**🟢 猜错只影响展示**
+**🟢 错误临时策略只影响展示**
 
 - `<G-xx>`：<后果一句话>
 
@@ -68,8 +68,8 @@
 - code: G-<两位数字>
   missing: <缺什么，一句话。写"缺什么"，不写"要做什么">
   blocks: [<被卡住的交付物 ID 或相对路径>]
-  protectiveDefault: <缺口未关闭时代码的具体行为。不允许写"待定">
-  rollbackCost: <猜错了改回来要动什么>
+  protectiveDefault: <已获授权的 fail-closed 行为；没有其他授权时写 block_dependent_action>
+  rollbackCost: <该临时策略改变时要动什么>
   owner: <产品 | 业务 | 商务>
   status: open
   closedBy: null
@@ -78,5 +78,5 @@
 
 两个字段值得单独说：
 
-- **`protectiveDefault` 不允许写"待定"。** 缺口登记的意义就是"代码照样能往下写"，写不出一个具体行为说明还没想清楚。选法见 `CLAUDE.md §3`。
-- **`rollbackCost` 的作用不是文档，是校验。** 写不出来说明选的基线不可回滚，该换一个。
+- **`protectiveDefault` 不允许伪装成未知事实的答案。** 无已授权行为时写 `block_dependent_action`；这仍允许无关的可逆工作继续。资格条件见 `DISCIPLINES.md §4`。
+- **`rollbackCost` 的作用不是装饰，是校验。** 写不出来说明临时策略不可安全回滚，应继续阻塞依赖动作。

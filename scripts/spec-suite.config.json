@@ -8,6 +8,17 @@
   ],
   "generatedDir": "generated",
   "claudeMd": "CLAUDE.md",
+  "agentEntry": {
+    "source": "contracts/agent-entry.yaml",
+    "adapters": [
+      { "platform": "claude", "path": "CLAUDE.md", "projection": "agent-entry.common" }
+    ]
+  },
+  "bundle": {
+    "inputs": ["contracts/dictionary.yaml", "contracts/errors.yaml", "contracts/permissions.yaml"],
+    "output": "generated/contract-bundle.json",
+    "manifest": "generated/manifest.json"
+  },
 
   "_note-mayLackDefinition": "合法未决的命名空间（会开了、方向定了、还没落成文件的 T-OPEN 项）标 mayLackDefinition:true。引用它不算悬空、只报 warn。见 SCHEMA.md §5.1。",
   "idNamespaces": [
@@ -26,6 +37,7 @@
   ],
 
   "projections": {
+    "agent-entry.common": "agentEntryCommon",
     "stateMachines.*.transitions": "transitionTable",
     "enums.*.values": "enumTable",
     "errors": "errorTable",

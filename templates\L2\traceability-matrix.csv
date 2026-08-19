@@ -1,3 +1,0 @@
-FR,FR名称,BR,AC/NFR,API,屏,弹窗,表,权限码,错误码,阻塞D/外部依赖,缺口G,状态
-<FR-01>,<功能名>,<BR-XXX-001>,<AC-XXX-001>,<METHOD /path>,S03;S04,M01,<table>;<table>,<perm:code>,<ERR-XXXXX>,,,可开发
-<FR-01>,<功能名>,<BR-XXX-002>,<AC-XXX-002>,<METHOD /path>,S03;S04,M02,<table>,<perm:code>,<ERR-XXXXX>,,G-01,阻塞

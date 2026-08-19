@@ -3,7 +3,7 @@
 -- 生成依据：<数据库设计.md> · <字典>.yaml
 -- 规则版本：<BR vX.Y>   ·   <MySQL 8.0 / InnoDB / utf8mb4>
 --
--- 纪律（CLAUDE.md <N-08 类禁令>）：
+-- 纪律（canonical Agent Entry Contract 的 <N-08 类禁令>）：
 --   标 [APPEND-ONLY] 的表禁止 UPDATE 覆盖业务列、禁止物理 DELETE、无 del_flag、无 version
 --   标 [CAS] 的表仅 status 及一次性回填列可 UPDATE，且必须 WHERE status=<from>
 --   标 [MUTABLE] 的表可正常 UPDATE（带乐观锁）

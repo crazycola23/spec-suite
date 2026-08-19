@@ -16,7 +16,6 @@
 meta:
   suite: <项目代号>
   truthSource: <10-why/02-业务规则说明.md>   # 相对路径。绝不写绝对路径
-  version: v1
 
 # ---------------------------------------------------------------------------
 # 枚举
@@ -71,16 +70,16 @@ stateMachines:
 # ---------------------------------------------------------------------------
 # 规则缺口
 #   decisions/gaps.md 的表格由本节渲染，不要在那边手写第二份。
-#   protectiveDefault：缺口未关闭时代码的行为（不是"待定"，是一个具体行为）
-#   rollbackCost：猜错了改回来要动什么。写不出来说明基线选错了
+#   protectiveDefault：已获授权的 fail-closed 行为；无其他授权时阻塞依赖动作
+#   rollbackCost：临时策略改变时要动什么。写不出来就不要执行该策略
 # ---------------------------------------------------------------------------
 gaps:
   # <示例，删除本条>
   - code: G-01
     missing: 发布失败后允许重试几次
     blocks: [contracts/openapi.yaml, T-09]
-    protectiveDefault: 只允许一次，由唯一索引强制；超出返回业务冲突错误
-    rollbackCost: 放宽次数 = 删一个唯一索引；收紧 = 需要清理已产生的重复发布，不可逆
+    protectiveDefault: 不自动重试；返回 unresolved_policy 并转人工处理
+    rollbackCost: 获得规则后新增策略配置；没有历史自动重试需要清理
     owner: 产品
     status: open
     closedBy: null

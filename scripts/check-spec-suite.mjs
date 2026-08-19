@@ -13,9 +13,9 @@
  *
  * 用法：
  *   node check-spec-suite.mjs [--specs-root <路径>] [--config <路径>]
- *                             [--report <输出目录>] [--write] [--quiet]
+ *                             [--report <输出目录>] [--write-generated-regions] [--quiet]
  *
- *   --write   重写 .md 生成区（唯一的写入模式；不加就是全程只读）
+ *   --write-generated-regions  只重写 .md 生成区；不生成 contract bundle
  *   --report  把 report.json + report.md 写到指定目录（不写入被检查的库）
  *
  * 退出码：有 error 级发现 → 1，否则 0。
@@ -152,6 +152,8 @@ export function loadConfig({ specsRoot, configPath, fallbackConfigPath }) {
     dictionaries: cfg.dictionaries ?? [],
     generatedDir: cfg.generatedDir ?? 'generated',
     claudeMd: cfg.claudeMd ?? 'CLAUDE.md',
+    agentEntry: cfg.agentEntry ?? null,
+    bundle: cfg.bundle ?? null,
     idNamespaces: (cfg.idNamespaces ?? []).map((n) => ({ ...n, re: new RegExp(n.pattern) })),
     projections: cfg.projections ?? {},
     structuredFileGlobs: cfg.structuredFileGlobs ?? ['**/*.yaml', '**/*.yml', '**/*.json', '**/*.csv'],
@@ -200,7 +202,21 @@ export function buildModel({ specsRoot, config, YAML, col }) {
       list.forEach((v, i) => collections[key].push({ value: v, file: rel, index: i }))
     }
   }
-  return { collections, files, missing }
+  let agentEntry = null
+  if (config.agentEntry?.source) {
+    const rel = config.agentEntry.source
+    const abs = path.join(specsRoot, rel)
+    if (!fs.existsSync(abs)) {
+      col?.add(1, 'error', `agentEntry.source 不存在：\`${rel}\``, { file: rel })
+    } else {
+      try {
+        agentEntry = YAML.parse(readText(abs))
+      } catch (e) {
+        col?.add(1, 'error', `Agent Entry Contract YAML 解析失败：${e.message}`, { file: rel })
+      }
+    }
+  }
+  return { collections, files, missing, agentEntry }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +311,14 @@ export function checkSchema({ model, col }) {
   col.stat(1, '记录总数', records)
   col.stat(1, 'source 缺失或为空', missingSource)
   col.stat(1, '残留占位符', placeholders)
+  if (model.agentEntry !== null) {
+    if (model.agentEntry?.schemaVersion !== 1) {
+      col.add(1, 'error', 'Agent Entry Contract 的 `schemaVersion` 必须是 1')
+    }
+    if (typeof model.agentEntry?.common?.markdown !== 'string' || model.agentEntry.common.markdown.trim() === '') {
+      col.add(1, 'error', 'Agent Entry Contract 缺少非空的 `common.markdown`')
+    }
+  }
   return { records, missingSource, placeholders }
 }
 
@@ -673,6 +697,12 @@ const table = (head, rows) => [
 const findByCode = (entries, code) => entries?.find((e) => e.value?.code === code)?.value
 
 export const RENDERERS = {
+  agentEntryCommon(model) {
+    const markdown = model.agentEntry?.common?.markdown
+    if (typeof markdown !== 'string' || markdown.trim() === '') return null
+    return markdown.replace(/\r\n/g, '\n').replace(/\n+$/, '').split('\n')
+  },
+
   // stateMachines.<code>.transitions
   transitionTable(model, parts) {
     const m = findByCode(model.collections.stateMachines, parts[1])
@@ -740,6 +770,10 @@ export function enumerateProjections(model, projections) {
   for (const pattern of Object.keys(projections)) {
     const pp = pattern.split('.')
     if (!pp.includes('*')) {
+      if (pattern === 'agent-entry.common' && model.agentEntry) {
+        out.push(pattern)
+        continue
+      }
       if ((model.collections[pp[0]] ?? []).length > 0) out.push(pattern)
       continue
     }
@@ -923,10 +957,10 @@ export function parseBanCoverage(text) {
 }
 
 export function checkBanCoverage({ specsRoot, config, col }) {
-  const rel = config.claudeMd
+  const rel = config.agentEntry?.adapters?.[0]?.path ?? config.claudeMd
   const abs = path.join(specsRoot, rel)
   if (!fs.existsSync(abs)) {
-    col.add(5, 'error', `找不到 \`${rel}\` —— 它是唯一必然进入 agent 上下文的执行面。规格写完但没有它，等于没有规格`)
+    col.add(5, 'error', `找不到 Agent Entry adapter \`${rel}\` —— 当前平台没有可检查的执行入口`)
     return { bans: [], covered: 0 }
   }
   const text = readText(abs)
@@ -937,7 +971,7 @@ export function checkBanCoverage({ specsRoot, config, col }) {
   }
   if (rows.length === 0) {
     col.add(5, 'error',
-      `\`${rel}\` 里没有禁令→断言覆盖表。没有断言的禁令，三个月后一定已经被违反`, { file: rel })
+      `\`${rel}\` 里没有禁令→断言覆盖表。没有断言时，这些禁令只能视为未验证风险`, { file: rel })
     return { bans, covered: 0 }
   }
 
@@ -1249,7 +1283,7 @@ export async function run(opts) {
   checkIdempotencyTuples({ specsRoot, config, model, col })
   checkStateMachines({ model, col })
   const idRefResult = checkIdRefs({ specsRoot, config, model, col })
-  checkZones({ specsRoot, config, model, col, write: !!opts.write })
+  const zoneResult = checkZones({ specsRoot, config, model, col, write: !!opts.write })
   checkBanCoverage({ specsRoot, config, col })
   checkLabelCopy({ specsRoot, config, model, col })
   checkCoverageMatrix({ specsRoot, config, idRefResult, col })
@@ -1268,7 +1302,7 @@ export async function run(opts) {
     stats: col.stats,
     findings: col.findings,
   }
-  return { report, config, model, col, errors }
+  return { report, config, model, col, errors, zoneResult, idRefResult }
 }
 
 function parseArgv(argv) {
@@ -1278,9 +1312,10 @@ function parseArgv(argv) {
     if (a === '--specs-root') o.specsRoot = argv[++i]
     else if (a === '--config') o.config = argv[++i]
     else if (a === '--report') o.report = argv[++i]
-    else if (a === '--write') o.write = true
+    else if (a === '--write-generated-regions' || a === '--write') o.write = true
     else if (a === '--quiet') o.quiet = true
     else if (a === '--help' || a === '-h') o.help = true
+    else throw new Error(`未知参数：${a}`)
   }
   return o
 }
@@ -1290,7 +1325,9 @@ const HELP = `用法：node check-spec-suite.mjs [选项]
   --specs-root <路径>   规格库根目录（默认当前目录）
   --config <路径>       config 文件（默认 <root>/spec-suite.config.json）
   --report <目录>       把 report.json + report.md 写到这里（不写入被检查的库）
-  --write               重写 .md 生成区（唯一写入模式；不加则全程只读）
+  --write-generated-regions
+                        只重写 .md 生成区，不生成 contract bundle
+  --write               上一参数的兼容别名
   --quiet               只打摘要
 `
 
@@ -1303,6 +1340,9 @@ async function main() {
   let r
   try {
     r = await run(opts)
+    if (opts.write && r.zoneResult.rewritten > 0) {
+      r = await run({ ...opts, write: false })
+    }
   } catch (e) {
     process.stderr.write(`检查器无法运行：${e.message}\n`)
     return 2
