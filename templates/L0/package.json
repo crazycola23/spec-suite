@@ -1,0 +1,14 @@
+{
+  "_comment": "模板：拷到规格库根目录，把 <项目代号> 换成真名。scripts/check-spec-suite.mjs 也一并拷进规格库自身（不要引用相邻的 skill 目录，否则 CI 里跑不到）。",
+  "name": "<项目代号>-specs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check-spec-suite.mjs --specs-root . --config spec-suite.config.json",
+    "generate": "node scripts/check-spec-suite.mjs --specs-root . --config spec-suite.config.json --write",
+    "test": "node --test scripts/*.test.mjs"
+  },
+  "devDependencies": {
+    "yaml": "^2"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "_comment": "这个 example 是一套已填好的最小 L0 规格库：checker 对它跑出 0 error。它有两个作用——(1) 是 checker 自己的回归夹具（scripts 的测试会实例化它并断言 0 error）；(2) 是「一套正确的最小套件长什么样」的活文档。改模板时先在这里验证。",
+  "dictionaries": ["contracts/dictionary.yaml"],
+  "generatedDir": "generated",
+  "claudeMd": "CLAUDE.md",
+  "idNamespaces": [
+    { "prefix": "BR", "pattern": "^BR-[A-Z]+-\\d{3}$", "kind": "rule", "definedIn": ["10-why/02-*.md"] },
+    { "prefix": "G",  "pattern": "^G-\\d{2}$",         "kind": "gap",  "definedIn": ["contracts/dictionary.yaml"] }
+  ],
+  "projections": { "gaps": "gapTable" },
+  "structuredFileGlobs": ["**/*.yaml", "**/*.yml", "**/*.json", "**/*.csv"],
+  "markdownGlobs": ["**/*.md"],
+  "ddlGlobs": ["contracts/ddl/**/*.sql"],
+  "excludeFromScan": ["node_modules/**", ".git/**", "generated/**"],
+  "labelCopyAllowlist": [],
+  "coverageRequirements": []
+}

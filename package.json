@@ -1,0 +1,14 @@
+{
+  "name": "spec-suite",
+  "private": true,
+  "version": "1.0.0",
+  "description": "spec-suite skill 自身的开发依赖。审计别人的规格库不需要在这里装 —— checker 会用被审计库自己的 yaml。只有要跑本 skill 的单测时先 `npm i`。",
+  "type": "module",
+  "scripts": {
+    "test": "node --test scripts/*.test.mjs"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "yaml": "^2.9.0"
+  }
+}

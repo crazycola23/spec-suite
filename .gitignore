@@ -1,0 +1,5 @@
+# 本 skill 目录不签入依赖。checker 的 yaml 解析链是：
+#   本目录 node_modules → --specs-root 的 node_modules → cwd 的 node_modules
+# 审计别人的库时用那个库自己装的 yaml，所以这里平时**不需要**装。
+# 只有要跑本 skill 自己的单测（node --test scripts/*.test.mjs）时才 `npm i` 一次。
+node_modules/

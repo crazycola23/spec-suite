@@ -1,0 +1,42 @@
+# 模板：contracts/permissions.yaml（L1）
+#
+# risk / inheritable 是**声明属性**，挂在每条权限上。
+# 不要另开 highRiskPermissions: 节点 ——
+#   同一概念两处定义，checker 就得手工 union 多个来源，且两处必然分叉。
+#
+# risk: high 的含义是「做错不可撤销」，不是「重要」。
+#   判据：这个动作产生的后果，能不能用一次数据库操作撤销？不能 → high。
+#
+# inheritable: false 的含义是任何角色模板、任何上级码都不得隐式带来它。
+#   必须逐个显式授予。高危码一律 false。
+
+permissions:
+  # <示例，删除本条>
+  - code: <前缀>:budget:release
+    label: 预算放行
+    source: BR-AUDIT-001
+    risk: high
+    inheritable: false
+    routes: [<路由路径>]
+    auditAction: BUDGET_APPROVED     # 成功执行时写哪个审计动作；无则 null
+
+  # <示例，删除本条 —— 演示 list 与 view 的区分>
+  - code: <前缀>:project:list
+    label: 项目列表查看
+    source: BR-PROJECT-001
+    risk: normal
+    inheritable: true
+    routes: [<路由路径>]
+    auditAction: null
+
+  - code: <前缀>:project:view
+    label: 项目详情查看
+    source: BR-PROJECT-001
+    risk: normal
+    inheritable: true
+    routes: [<路由路径>]
+    auditAction: null
+
+# <把 list 与 view 拆开的理由写进 .md 的散文区，不写在这里。
+#  一般理由：列表页的聚合字段与详情页的敏感字段权限边界不同，
+#  合成一个码就无法只给列表不给详情。>

@@ -1,0 +1,59 @@
+# 模板：拷到规格库的 .github/workflows/spec-check.yml
+#
+# 前提：规格库自身已经有这三样（跟着 L0 一起拷进去，不是引用相邻的 skill 目录）：
+#   - scripts/check-spec-suite.mjs
+#   - spec-suite.config.json（或 scripts/spec-suite.config.json）
+#   - package.json，其中 devDependencies 有 yaml@^2，且 "scripts": { "check": "...", "test": "node --test scripts/*.test.mjs" }
+#
+# 为什么必须挂 CI（不能靠人手跑）：手跑的报告在活库上一写完就过期 —— 只要底下有文件再动一下，
+# 计数就变了，保存的报告却还是旧的。闸门必须在每次 push / PR 上对着当时的树跑，才有意义。
+#
+# 消费仓库（放代码的仓库）另配一份 verify:contracts，比对签入的契约副本与本库 generated/。
+# 不要让本库的生成脚本直接写到相邻仓库 —— 那样两边 CI 都跑不到这个比对。见 SKILL.md §2。
+
+name: spec-suite 检查
+
+on:
+  push:
+    paths:
+      - 'contracts/**'
+      - 'decisions/**'
+      - '10-why/**'
+      - 'CLAUDE.md'
+      - 'scripts/**'
+      - 'spec-suite.config.json'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 只需要 yaml 这一个依赖；有 lockfile 就用 npm ci，否则装 yaml
+      - name: 安装依赖
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm i yaml@^2; fi
+
+      # 闸门本体：有 error 级发现时 checker 退出码为 1，CI 直接失败
+      - name: 一致性检查
+        run: node scripts/check-spec-suite.mjs --specs-root . --config spec-suite.config.json
+
+      # 生成区若与 yaml 不一致，--write 会改动工作树；用 git diff 判断是否有人忘了重新生成
+      - name: 生成区是否最新
+        run: |
+          node scripts/check-spec-suite.mjs --specs-root . --config spec-suite.config.json --write --quiet
+          if ! git diff --quiet; then
+            echo "::error::.md 生成区与 contracts/*.yaml 不一致 —— 本地跑 npm run generate 后重新提交"
+            git --no-pager diff --stat
+            exit 1
+          fi
+
+      # checker 自己的单测（若把测试也拷进了规格库）
+      - name: 单元测试
+        run: npm test --if-present
