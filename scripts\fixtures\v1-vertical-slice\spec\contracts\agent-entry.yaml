@@ -1,0 +1,19 @@
+schemaVersion: 1
+common:
+  markdown: |
+    ## Shared invariants
+
+    ### N-01 Unknown stays unknown
+
+    Unknown stays unknown. A fact without a resolvable authoritative source cannot enter the canonical contract.
+
+    ### N-02 Canonical stays canonical
+
+    Generated adapters and bundles are derived artifacts. They never become authoritative sources.
+
+    ## Enforcement
+
+    | 禁令 | 强制方式 | 在哪跑 | 状态 |
+    |---|---|---|---|
+    | N-01 | Every canonical fact has a resolvable non-gap source | spec CI | ✅ |
+    | N-02 | Generated regions and bundle bytes are reproduced from canonical inputs | spec CI | ✅ |

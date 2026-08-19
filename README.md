@@ -1,79 +1,89 @@
 # spec-suite
 
-面向多 Agent 协作的规格与契约套件。
+一个面向多 Agent、多仓库协作的可机器检查规格治理 skill。它的核心不是生成更多文档，而是让三条不变量可执行：
 
-spec-suite 的目标，是把容易被 Agent 自由发挥的自然语言约定，沉淀成可引用、可生成、可检查的规格资产，减少多仓库、多 Agent 并行开发时的规格漂移、重复定义和无依据编造。
+- **Unknown stays unknown**：没有权威依据的事实被持久化为 unresolved，不会在下一轮上下文里变成默认值。
+- **Canonical stays canonical**：共同纪律与业务契约只有一个 canonical source；adapter、bundle、manifest 和消费副本都没有裁决权。
+- **Derived stays reproducible**：相同输入确定性地产生相同的 Agent adapter、language-neutral bundle 和 consumer 验证结果。
 
-## 它解决什么问题
+## V1 已实现的纵切片
 
-当多个 Agent 同时开发一个系统时，最容易出现：
+```text
+lightweight unresolved
+        |
+        | idempotent migration
+        v
+       G-*
 
-- 同一个枚举、错误码或权限码被重复定义；
-- 下游代码复制上游的自然语言描述，后来各自发生漂移；
-- 产品决策尚未确定时，Agent 为了继续推进而自行补全；
-- 规格写完了，但没有进入 Agent 的工作上下文，也没有 CI 闸门保护。
+canonical agent entry        canonical contracts
+        |                            |
+        v                            v
+CLAUDE.md generated region   contract-bundle.json + manifest.json
+        |                            |
+        +----------- checked --------+
+                                     |
+                                     v
+                           verified consumer copy
+```
 
-spec-suite 通过四个相互配合的机制处理这些问题。
+V1 特意只证明边界和确定性：一个真实 Claude adapter、一个语言无关 JSON bundle、一个按 manifest / 文件集合 / 字节工作的 consumer verifier。它不提前承诺多语言代码生成、SemVer 兼容、`specHash` 或 breaking-change 语义。
 
-## 四个核心机制
+## 两种模式
 
-1. **单一真相源与分级裁决顺序**  
-   明确什么来源优先，以及发生冲突时应该听谁的。
+**轻量模式**适用于普通仓库里的单个无依据事实。只创建 `.spec-suite/unresolved.yaml`，不引入完整规格基础设施。若项目以后采用 spec-suite，同一事实可单向、幂等升级为一个 `G-*`。
 
-2. **下游只引用 ID，不复制描述**  
-   业务代码和下游规格引用稳定的规则、错误、权限或契约 ID，避免复制自然语言造成漂移。
+**完整模式**适用于已经采用 spec-suite，或存在多 Agent、多仓库、共享契约、钱/权限/不可逆外部动作的项目。从 L0 开始，按真实触发条件再加 L1–L3。
 
-3. **机器可读字典与代码生成**  
-   将枚举、错误码、权限码等集中在结构化字典中，并从字典生成下游需要的常量或契约。
+## CLI
 
-4. **缺口登记：`G-*` 是合法的“我不知道”**  
-   信息不足时登记缺口，记录保护性默认行为和关闭条件，禁止用猜测冒充已确认的产品决策。
+```bash
+# 持久化未知守卫；命中 unresolved 时退出 3
+node scripts/guard-unresolved-fact.mjs --specs-root . --fact retry_count
 
-## 渐进式分层
+# unresolved -> G-*，重复执行不复制记录
+node scripts/migrate-unresolved.mjs --specs-root . --fact retry_count \
+  --block src/retry-policy.ts --protective-default do_not_retry \
+  --rollback-cost "change one policy value" --owner product
 
-不要一开始就搭建所有目录。默认从 L0 开始，只有出现对应触发条件时才升级。
+# 只读检查
+node scripts/check-spec-suite.mjs --specs-root . --config spec-suite.config.json
 
-| 层级 | 主要内容 | 适用条件 |
-| --- | --- | --- |
-| **L0** | Agent 纪律、README、字典、缺口登记、checker、CI | 至少有 2 个 Agent 或 2 个仓库 |
-| **L1** | 通用约定、错误码、权限码、决策单、消费仓库指针 | 涉及金钱、权限、第三方接口或未定案产品决策 |
-| **L2** | 屏规格、弹窗规格、任务切片、追溯矩阵 | 前后端需要并行协作 |
-| **L3** | 进度台账、外部依赖基线、旧版停用清单 | 周期较长或需要治理历史代码 |
+# 只修 Markdown / adapter 生成区
+node scripts/check-spec-suite.mjs --specs-root . --config spec-suite.config.json \
+  --write-generated-regions
 
-契约层（OpenAPI、DDL、fixtures）与上述层级独立：进入契约工作流后再按需加入。
+# 只生成 language-neutral bundle
+node scripts/generate-contract-bundle.mjs --specs-root . --config spec-suite.config.json
 
-## 推荐工作流
+# 验证消费仓库签入副本
+node scripts/verify-consumer-contracts.mjs --specs-root . \
+  --config spec-suite.config.json --consumer-root <consumer-contract-directory>
+```
 
-1. 从访谈、会议记录或 PRD 中抽取事实和待决事项；
-2. 先冻结机器可读字典，不等待所有产品决策关闭；
-3. 生成 Agent 纪律、checker，并尽早接入 CI；
-4. 只关闭阻塞数据模型根的关键决策；
-5. 再进入 DDL、API 和测试夹具；
-6. 如果有前端，再并行补充屏规格、追溯矩阵和任务切片。
+generator 是 fail-closed：canonical input 缺失、无法解析、source 指向 gap/generated 或 checker 有缺陷时，命令失败并保留上一份正确 bundle。
 
-## 使用方式
+## 仓库结构
 
-先阅读 [SKILL.md](SKILL.md)，然后根据项目规模选择 L0～L3。任何没有可靠来源的枚举值、阈值、数量、超时、价格、权限边界或 SLA 数字，都必须做到以下二选一：
+- [`SKILL.md`](./SKILL.md)：轻量/完整模式、三条不变量、A–F 状态机与 router。
+- [`INTERVIEW.md`](./INTERVIEW.md)：证据抽取、source 资格、unresolved 与 decision 的边界。
+- [`DISCIPLINES.md`](./DISCIPLINES.md)：Canonical Agent Entry Contract 与平台 adapter 两区制。
+- [`SCHEMA.md`](./SCHEMA.md)：持久化协议、canonical schema、bundle/manifest、config 与 audit。
+- [`templates/`](./templates/)：lightweight、L0–L3 与 contract scaffolds。
+- [`scripts/`](./scripts/)：guard、migration、checker/fixer、generator、consumer verifier 和测试夹具。
 
-- 标注可靠来源；
-- 登记为 `G-*` 缺口。
+## 验证
 
-不要为了让文档看起来完整而编造 `BR-*`、阈值或数量。
+```bash
+npm install
+npm test
+```
 
-## 当前仓库
+测试覆盖幂等迁移、重复任务保持 unresolved、adapter 手写区保护、确定性生成、三类 fail-closed 路径，以及 consumer 副本的 manifest / 文件集合 / 字节校验。
 
-当前仓库提供 spec-suite 的核心 Agent 技能入口：
+## 设计边界
 
-- [SKILL.md](SKILL.md)：完整的方法、分层规则、工作流与检查原则；
-- [README.md](README.md)：项目概览与快速入口。
-
-模板、checker、生成器和 CI 示例可以根据实际采用的层级逐步补充，不建议预先创建空的 L1/L2/L3 骨架。
-
-## 设计原则
-
-- 一个概念只保留一种记录形状；
-- 计数从事实派生，不把容易过期的数字写成魔法常量；
-- 每条强制纪律都应有机器断言，或明确标记为人工审查；
-- 文档使用相对路径和稳定 ID，避免把本地绝对路径传播给下游；
-- 规格缺口可被看见、可被追踪、可被关闭。
-
+- `sourceSearch` 是 provenance，不是“事实不存在”的证据。
+- 只冻结 authoritative source 支持的事实；依赖未决选择的值保持 unresolved。
+- 共同 Agent 纪律从一个 canonical source 投影；平台特有规则留在 adapter 手写区。
+- regex/heuristic checker 保持便宜和透明；只有真实误报/漏报案例足够多时才升级 parser。
+- Action SHA pinning 属于 hardening，不冒充 V1 correctness。

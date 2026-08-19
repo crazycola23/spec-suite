@@ -1,0 +1,11 @@
+schemaVersion: 1
+facts:
+  - status: unresolved
+    fact: retry_count
+    sourceSearch:
+      - config
+      - docs
+      - code
+    evidence: []
+    blockedAction: do_not_implement_default
+    nextEvidence: product_owner_or_api_contract

@@ -1,0 +1,54 @@
+{
+  "contracts": {
+    "enums": [
+      {
+        "code": "MemberStatus",
+        "label": "成员状态",
+        "source": "BR-MEMBER-001",
+        "values": [
+          {
+            "code": "active",
+            "label": "生效",
+            "source": "BR-MEMBER-001"
+          },
+          {
+            "code": "removed",
+            "label": "已移除",
+            "source": "BR-MEMBER-002"
+          }
+        ]
+      }
+    ],
+    "stateMachines": [
+      {
+        "code": "Invitation",
+        "label": "邀请",
+        "source": "BR-MEMBER-003",
+        "states": [
+          {
+            "code": "pending",
+            "label": "待接受",
+            "source": "BR-MEMBER-003",
+            "terminal": false,
+            "transitions": [
+              {
+                "source": "BR-MEMBER-004",
+                "to": "accepted",
+                "trigger": "accept"
+              }
+            ]
+          },
+          {
+            "code": "accepted",
+            "label": "已接受",
+            "source": "BR-MEMBER-003",
+            "terminal": true,
+            "transitions": []
+          }
+        ]
+      }
+    ]
+  },
+  "schemaVersion": 1,
+  "suite": "example"
+}

@@ -1,0 +1,34 @@
+{
+  "_comment": "L0 template. Replace project paths and namespace patterns before enabling CI.",
+  "dictionaries": ["contracts/dictionary.yaml"],
+  "generatedDir": "generated",
+  "claudeMd": "CLAUDE.md",
+  "agentEntry": {
+    "source": "contracts/agent-entry.yaml",
+    "adapters": [
+      { "platform": "claude", "path": "CLAUDE.md", "projection": "agent-entry.common" }
+    ]
+  },
+  "bundle": {
+    "inputs": ["contracts/dictionary.yaml"],
+    "output": "generated/contract-bundle.json",
+    "manifest": "generated/manifest.json"
+  },
+  "idNamespaces": [
+    { "prefix": "BR", "pattern": "^BR-[A-Z]+-\\d{3}$", "kind": "rule", "definedIn": ["10-why/02-*.md"] },
+    { "prefix": "G", "pattern": "^G-\\d{2}$", "kind": "gap", "definedIn": ["contracts/dictionary.yaml"] },
+    { "prefix": "N", "pattern": "^N-\\d{2}$", "kind": "ban", "definedIn": ["CLAUDE.md"] }
+  ],
+  "projections": {
+    "agent-entry.common": "agentEntryCommon",
+    "stateMachines.*.transitions": "transitionTable",
+    "enums.*.values": "enumTable",
+    "gaps": "gapTable"
+  },
+  "coverageRequirements": [],
+  "structuredFileGlobs": ["**/*.yaml", "**/*.yml", "**/*.json", "**/*.csv"],
+  "markdownGlobs": ["**/*.md"],
+  "ddlGlobs": ["contracts/ddl/**/*.sql"],
+  "excludeFromScan": ["node_modules/**", ".git/**", "generated/**"],
+  "labelCopyAllowlist": []
+}

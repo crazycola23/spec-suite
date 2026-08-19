@@ -1,0 +1,33 @@
+{
+  "_comment": "模板：有写契约 / 任务切片时拷入（templates/contracts/），命名门风如 60-fixtures/fixtures.json。一份数据同时喂 Mock、自动化测试、原型 —— 任何一方要新数据都改本文件，不各自造。$meta 的几条警告是本文件的地基，先填 $meta 再加数据。占位符 <...> 拷入后必须全替换 —— fixtures 是结构化文件，残留会被 checker 报为缺陷。",
+
+  "$meta": {
+    "purpose": "一份数据同时喂 Mock（前端）+ 自动化测试 + 原型。任何一方需要新数据，改本文件，不各自造。",
+    "codeSource": "所有状态/枚举值来自 <字典>.yaml。禁止出现无 source 的状态值（Agent Entry Contract N-01）",
+    "fixtureIds": "夹具代号来自 <验收用例文档 §N>，逐一对应",
+    "ruleVersion": "<BR vX.Y>",
+    "contractVersion": "<1.0>",
+    "sampleValueWarning": "⚠️ 所有金额、单价、比例、时间戳均为示例值，不得作为实现依据（N-05 类禁令）"
+  },
+
+  "<entities>": [
+    { "id": "<1>", "name": "<示例名>", "status": "<code>", "version": 0 }
+  ],
+
+  "<entity>WriteCases": {
+    "_desc": "T-<nn> <弹窗/动作> typed body；<一句话契约语义，引用 BR ID>",
+    "create": {
+      "<field>": "<示例值>",
+      "forbiddenRequestFields": ["status", "version", "<编号>", "createTime", "updateTime"],
+      "expect": { "outcome": "<created>", "status": "<code>", "auditAction": "<ACTION>" }
+    }
+  },
+
+  "$negativeCases": {
+    "_desc": "负例集中放一处：<前置缺失 / 重复提交 / 版本冲突 / 无权限> 各一条，写期望的错误码和 details 字段",
+    "<case>": {
+      "request": { "<field>": "<非法值>" },
+      "expect": { "error": "<ERR-XXXXX>", "details": ["<field>"] }
+    }
+  }
+}

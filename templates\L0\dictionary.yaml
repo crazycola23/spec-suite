@@ -1,0 +1,86 @@
+# 模板：contracts/dictionary.yaml
+#
+# 这份 yaml 是枚举、状态机和规则缺口的**权威来源**。
+# .md 只是它的可读渲染 + 手写散文；generated/ 由它生成。
+#
+# 通用规则（全部在 SCHEMA.md §1，这里只列最容易违反的三条）：
+#   1. 每个集合都是对象数组，元素必带 code。不允许裸字符串集合。
+#   2. 每个业务事实必带 source，值是真相源里的规则 ID，checker 会解析它。
+#      —— 这是"不得发明"从人工纪律变成机器断言的地方。
+#   3. label 是唯一允许出现的中文人类标签，且只允许出现在字典里。
+#      别的结构化文件出现同一字符串 = 复制描述 = 检查 6 报错。
+#
+# 标 <示例> 的整节在填真实内容时删除，不要留着当参考 ——
+# 残留的示例会被后来的 agent 当成真规则。
+
+meta:
+  suite: <项目代号>
+  truthSource: <10-why/02-业务规则说明.md>   # 相对路径。绝不写绝对路径
+
+# ---------------------------------------------------------------------------
+# 枚举
+# ---------------------------------------------------------------------------
+enums:
+  # <示例，删除本条>
+  - code: AuditAction
+    label: 审计动作
+    source: BR-AUDIT-001
+    values:
+      - code: PROJECT_CREATED
+        label: 项目创建
+        source: BR-AUDIT-001
+      - code: BUDGET_APPROVED
+        label: 预算已放行
+        source: BR-AUDIT-001
+
+# ---------------------------------------------------------------------------
+# 状态机
+#   transitions[].to 必须是同一状态机内存在的 code（检查 2）
+#   终态写 terminal: true + transitions: []
+#   —— 空数组不能省略。省略无法区分"终态"和"忘了写"
+# ---------------------------------------------------------------------------
+stateMachines:
+  # <示例，删除本条>
+  - code: PublishRecord
+    label: 发布记录
+    source: BR-PUBLISH-002
+    states:
+      - code: draft
+        label: 草稿
+        source: BR-PUBLISH-002
+        terminal: false
+        transitions:
+          - to: submitted
+            trigger: submit
+            source: BR-PUBLISH-003
+      - code: submitted
+        label: 已提交
+        source: BR-PUBLISH-002
+        terminal: false
+        transitions:
+          - to: published
+            trigger: providerAck
+            source: BR-PUBLISH-003
+      - code: published
+        label: 已发布
+        source: BR-PUBLISH-002
+        terminal: true
+        transitions: []
+
+# ---------------------------------------------------------------------------
+# 规则缺口
+#   decisions/gaps.md 的表格由本节渲染，不要在那边手写第二份。
+#   protectiveDefault：已获授权的 fail-closed 行为；无其他授权时阻塞依赖动作
+#   rollbackCost：临时策略改变时要动什么。写不出来就不要执行该策略
+# ---------------------------------------------------------------------------
+gaps:
+  # <示例，删除本条>
+  - code: G-01
+    missing: 发布失败后允许重试几次
+    blocks: [contracts/openapi.yaml, T-09]
+    protectiveDefault: 不自动重试；返回 unresolved_policy 并转人工处理
+    rollbackCost: 获得规则后新增策略配置；没有历史自动重试需要清理
+    owner: 产品
+    status: open
+    closedBy: null
+    closedAt: null

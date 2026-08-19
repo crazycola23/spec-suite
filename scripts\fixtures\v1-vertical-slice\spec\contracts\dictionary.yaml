@@ -1,0 +1,18 @@
+meta:
+  suite: v1-vertical-slice
+  truthSource: 10-why/02-rules.md
+
+enums:
+  - code: RetryMode
+    label: Retry mode
+    source: BR-RETRY-001
+    values:
+      - code: MANUAL_ONLY
+        label: Manual only
+        source: BR-RETRY-001
+      - code: DISABLED
+        label: Disabled
+        source: BR-RETRY-001
+
+stateMachines: []
+gaps: []

@@ -1,0 +1,60 @@
+{
+  "_comment": "示例 config。拷到规格库根目录后按项目改。字段含义与三个计数陷阱见 SCHEMA.md §5。",
+
+  "dictionaries": [
+    "contracts/dictionary.yaml",
+    "contracts/errors.yaml",
+    "contracts/permissions.yaml"
+  ],
+  "generatedDir": "generated",
+  "claudeMd": "CLAUDE.md",
+  "agentEntry": {
+    "source": "contracts/agent-entry.yaml",
+    "adapters": [
+      { "platform": "claude", "path": "CLAUDE.md", "projection": "agent-entry.common" }
+    ]
+  },
+  "bundle": {
+    "inputs": ["contracts/dictionary.yaml", "contracts/errors.yaml", "contracts/permissions.yaml"],
+    "output": "generated/contract-bundle.json",
+    "manifest": "generated/manifest.json"
+  },
+
+  "_note-mayLackDefinition": "合法未决的命名空间（会开了、方向定了、还没落成文件的 T-OPEN 项）标 mayLackDefinition:true。引用它不算悬空、只报 warn。见 SCHEMA.md §5.1。",
+  "idNamespaces": [
+    { "prefix": "BR", "pattern": "^BR-[A-Z]+-\\d{3}$", "kind": "rule",       "definedIn": ["10-why/02-*.md"] },
+    { "prefix": "AC", "pattern": "^AC-[A-Z]+-\\d{3}$", "kind": "acceptance", "definedIn": ["10-why/04-*.md"] },
+    { "prefix": "D",  "pattern": "^D-\\d{2}$",         "kind": "decision",   "definedIn": ["decisions/register.md"] },
+    { "prefix": "G",  "pattern": "^G-\\d{2}$",         "kind": "gap",        "definedIn": ["contracts/dictionary.yaml"] },
+    { "prefix": "N",  "pattern": "^N-\\d{2}$",         "kind": "ban",        "definedIn": ["CLAUDE.md"] },
+    { "prefix": "RL", "pattern": "^RL-\\d{2}$",        "kind": "redline",    "definedIn": ["contracts/errors.yaml"] },
+    { "prefix": "T-OPEN", "pattern": "^T-OPEN-\\d{2}$", "kind": "tech-open", "definedIn": ["decisions/T-OPEN-*.md"], "mayLackDefinition": true }
+  ],
+
+  "_note-coverageRequirements": "检查 7：某类 ID 必须全部进指定覆盖文件。默认 warn；要当闸门写 severity:error。L2 起有追溯矩阵才配。",
+  "coverageRequirements": [
+    { "namespace": "BR", "mustAppearIn": "50-delivery/11-*.csv", "severity": "warn" }
+  ],
+
+  "projections": {
+    "agent-entry.common": "agentEntryCommon",
+    "stateMachines.*.transitions": "transitionTable",
+    "enums.*.values": "enumTable",
+    "errors": "errorTable",
+    "permissions": "permissionTable",
+    "frontendRedLines": "redLineTable",
+    "gaps": "gapTable"
+  },
+
+  "structuredFileGlobs": ["**/*.yaml", "**/*.yml", "**/*.json", "**/*.csv"],
+  "markdownGlobs": ["**/*.md"],
+  "ddlGlobs": ["contracts/ddl/**/*.sql"],
+  "excludeFromScan": [
+    "node_modules/**",
+    ".git/**",
+    "generated/**",
+    "90-prototype/**"
+  ],
+
+  "labelCopyAllowlist": []
+}

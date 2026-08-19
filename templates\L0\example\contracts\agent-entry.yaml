@@ -1,0 +1,41 @@
+schemaVersion: 1
+common:
+  markdown: |
+    ## 0. 裁决顺序
+
+    | 优先级 | 来源 | 冲突时 |
+    |---:|---|---|
+    | 1 | `10-why/02-业务规则.md`（`BR-*`） | 唯一业务真相源；其他内容是待修派生物 |
+    | 2 | `contracts/*.yaml` | 与规则冲突就改 canonical contract |
+    | 3 | adapter、`generated/`、manifest、consumer copy | 无裁决权；重新生成或同步 |
+
+    ## 1. 共享禁令
+
+    ### N-01 Unknown stays unknown
+
+    没有可解析 authoritative source 的事实不得进入 canonical contract。未知值保持 unresolved；完整模式只登记同一个 `G-*`。
+
+    ### N-02 Canonical stays canonical
+
+    generated region、bundle、manifest 和 consumer copy 都是派生物，不得手改或反向作为 source。
+
+    ### N-03 下游只引用 ID
+
+    下游引用稳定 ID，不复制 canonical 描述。
+
+    ### N-04 实现选择不得改变业务口径
+
+    实现与规则冲突时停止依赖动作并暴露冲突，不在代码里选一个更方便的解释。
+
+    ## 2. 发现未知事实
+
+    停止写默认值 → 查 authoritative source → 能问则问 → 持久化 unresolved → 只继续无关的可逆工作。
+
+    ## 3. 禁令覆盖
+
+    | 禁令 | 强制方式 | 在哪跑 | 状态 |
+    |---|---|---|---|
+    | N-01 | source 必填、可解析，generator 拒绝 gap/generated | 规格库 CI | ✅ |
+    | N-02 | generated region、bundle 与 consumer 字节比对 | 规格库 CI + consumer CI | ✅ |
+    | N-03 | 结构化 label copy 检查 | 规格库 CI | ⚠️ 部分 |
+    | N-04 | 只能人工审查业务语义是否被隐式改变 | PR review | ⚠️ 技术债 |

@@ -1,0 +1,48 @@
+# 模板：contracts/errors.yaml（L1）
+#
+# 前端唯一的分支依据是 code。所以：
+#   一个 code 只能有一个语义。复用一个已有码表达第二种情况 = 前端必然误渲染。
+#
+# class 是**声明属性**，不靠码段数字猜。
+#   transport   传输层（重放、限流、格式错误）
+#   validation  入参校验
+#   business    业务规则拒绝
+#   external    第三方相关（含"未知"结果）
+#
+# frontendAction 是前端拿到这个码该做什么，取值固定：
+#   toast | inlineField | navigate | confirmDialog | manualOnly
+#
+# details 里写**字段名**，不写中文说明 —— 前端靠字段名跳转，不靠解析 message。
+
+errors:
+  # <示例，删除本条>
+  - code: <GEO-40901>
+    httpStatus: 409
+    class: business
+    label: 业务幂等冲突
+    source: BR-PROJECT-002
+    details: [existingId]
+    frontendAction: navigate
+
+  # <示例，删除本条 —— 演示"未知不许重试">
+  - code: <GEO-42404>
+    httpStatus: 200
+    class: external
+    label: 第三方结果未知
+    source: BR-DETECT-004
+    details: [providerRequestId]
+    frontendAction: manualOnly
+
+# ---------------------------------------------------------------------------
+# 前端渲染红线
+#   写成有 code 的记录，不写成散文列表 —— 否则 .md 里少一条也没人发现
+#   （真实项目里出现过 yaml 有五条、md 只写了四条，无人察觉）
+# ---------------------------------------------------------------------------
+frontendRedLines:
+  # <示例，删除本条>
+  - code: RL-01
+    label: 不许按 HTTP status 分支
+    source: <conventions.md §2.1>
+  - code: RL-02
+    label: 不许解析 message 文本分支
+    source: <conventions.md §2.1>

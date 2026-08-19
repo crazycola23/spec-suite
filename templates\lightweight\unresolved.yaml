@@ -1,0 +1,12 @@
+# Lightweight persistence only. Do not bootstrap the full suite for one unsupported fact.
+schemaVersion: 1
+facts:
+  - status: unresolved
+    fact: <stable_fact_name>
+    sourceSearch:
+      - config
+      - docs
+      - code
+    evidence: []
+    blockedAction: do_not_implement_default
+    nextEvidence: <owner_or_authoritative_contract>

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "inputs": [
+    "contracts/dictionary.yaml"
+  ],
+  "outputs": [
+    "contract-bundle.json"
+  ]
+}
