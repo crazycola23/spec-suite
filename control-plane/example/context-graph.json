@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "complete": true,
+  "kernel": [
+    "kernel:global"
+  ],
+  "nodes": [
+    {
+      "id": "kernel:global",
+      "kind": "kernel",
+      "path": "control-plane/global-safety-kernel.md",
+      "dependsOn": []
+    },
+    {
+      "id": "contract:customer-identity",
+      "kind": "contract",
+      "path": "control-plane/example/rules.md",
+      "dependsOn": []
+    },
+    {
+      "id": "fact:F-CUSTOMER-001",
+      "kind": "fact",
+      "path": "control-plane/example/canonical-facts.json",
+      "dependsOn": [
+        "contract:customer-identity"
+      ]
+    },
+    {
+      "id": "gap:G-17",
+      "kind": "gap",
+      "path": "control-plane/example/canonical-facts.json",
+      "dependsOn": []
+    },
+    {
+      "id": "contract:customer-write",
+      "kind": "contract",
+      "path": "control-plane/example/canonical-facts.json",
+      "dependsOn": [
+        "fact:F-CUSTOMER-001"
+      ]
+    },
+    {
+      "id": "provider:stripe",
+      "kind": "provider",
+      "path": "control-plane/example/adapters/stripe.adapter.json",
+      "dependsOn": [
+        "fact:F-CUSTOMER-001"
+      ]
+    },
+    {
+      "id": "permission:customer-write",
+      "kind": "permission",
+      "path": "control-plane/example/issuer-policy.json",
+      "dependsOn": [
+        "contract:customer-identity"
+      ]
+    },
+    {
+      "id": "action:customer-update",
+      "kind": "action",
+      "path": "control-plane/example/task.json",
+      "dependsOn": [
+        "contract:customer-write",
+        "permission:customer-write",
+        "provider:stripe"
+      ]
+    },
+    {
+      "id": "file:stripe-adapter",
+      "kind": "file",
+      "path": "control-plane/example/adapters/stripe.adapter.json",
+      "dependsOn": [
+        "provider:stripe"
+      ]
+    },
+    {
+      "id": "file:operator-runbook",
+      "kind": "file",
+      "path": "control-plane/README.md",
+      "dependsOn": []
+    }
+  ],
+  "blockers": [
+    {
+      "surface": "file.write:out/protected/customer.json",
+      "include": [
+        "gap:G-17"
+      ]
+    },
+    {
+      "surface": "network.mock.protected:stripe.customer.update",
+      "include": [
+        "gap:G-17"
+      ]
+    }
+  ]
+}
