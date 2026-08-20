@@ -9,6 +9,7 @@
   ],
   "surfaces": [
     "file.write:out/protected/customer.json",
-    "network.mock.protected:stripe.customer.update"
+    "network.mock.protected:stripe.customer.update",
+    "network.mock.live-stripe:stripe.customer.update"
   ]
 }

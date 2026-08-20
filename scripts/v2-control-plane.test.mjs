@@ -1,13 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { stableJson } from './control-plane-common.mjs'
+import { jsonDigest, stableJson } from './control-plane-common.mjs'
+import { loadIssuerDaemonConfig } from './control-plane-trust.mjs'
 import { interceptEffect } from './enforce-effect.mjs'
 import { projectContext } from './project-context.mjs'
 
@@ -36,6 +37,7 @@ function makeHarness() {
   const specsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-v2-specs-'))
   fs.cpSync(CONTROL_PLANE, path.join(specsRoot, 'control-plane'), { recursive: true })
   const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-v2-isolated-'))
+  fs.chmodSync(isolatedRoot, 0o700)
   const workspaceRoot = path.join(specsRoot, 'workspace')
   fs.mkdirSync(workspaceRoot, { recursive: true })
 
@@ -50,15 +52,145 @@ function makeHarness() {
   writeJson(revocationsPath, { schemaVersion: 1, revokedLeaseIds: [] })
   const auditPath = path.join(isolatedRoot, 'audit.jsonl')
   const mockNetworkLogPath = path.join(isolatedRoot, 'mock-network.jsonl')
+  const snapshotRoot = path.join(isolatedRoot, 'snapshot')
+  fs.mkdirSync(snapshotRoot)
+  fs.cpSync(CONTROL_PLANE, path.join(snapshotRoot, 'control-plane'), { recursive: true })
+  const protectTree = (root) => {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      const absolute = path.join(root, entry.name)
+      if (entry.isDirectory()) {
+        protectTree(absolute)
+        fs.chmodSync(absolute, 0o555)
+      } else {
+        fs.chmodSync(absolute, 0o444)
+      }
+    }
+  }
+  protectTree(snapshotRoot)
+  fs.chmodSync(snapshotRoot, 0o555)
+
+  const daemonUid = typeof process.getuid === 'function' ? process.getuid() : 0
+  const daemonGid = typeof process.getgid === 'function' ? process.getgid() : 0
+  const agentUid = daemonUid === 65534 ? 65533 : 65534
+  const agentIdentity = { uid: agentUid, gid: daemonGid, groups: [daemonGid], subject: 'agent:harness' }
+  const issuerConfigPath = path.join(isolatedRoot, 'issuer-daemon.json')
+  const enforcerConfigPath = path.join(isolatedRoot, 'enforcer-daemon.json')
+  writeJson(issuerConfigPath, {
+    schemaVersion: 1,
+    role: 'lease-issuer',
+    agentIdentity,
+    agentWorkspaceRoot: specsRoot,
+    snapshotRoot,
+    graph: GRAPH,
+    task: TASK,
+    state: STATE,
+    policy: POLICY,
+    privateKey: privateKeyPath,
+  })
+  writeJson(enforcerConfigPath, {
+    schemaVersion: 1,
+    role: 'effect-enforcer',
+    agentIdentity,
+    agentWorkspaceRoot: specsRoot,
+    snapshotRoot,
+    graph: GRAPH,
+    state: STATE,
+    policy: POLICY,
+    publicKey: publicKeyPath,
+    revocations: revocationsPath,
+    audit: auditPath,
+    mockNetworkLog: mockNetworkLogPath,
+    workspaceRoot,
+  })
+  fs.chmodSync(issuerConfigPath, 0o600)
+  fs.chmodSync(enforcerConfigPath, 0o600)
+
   return {
     specsRoot,
     isolatedRoot,
     workspaceRoot,
+    snapshotRoot,
     privateKeyPath,
     publicKeyPath,
     revocationsPath,
     auditPath,
     mockNetworkLogPath,
+    agentIdentity,
+    issuerConfigPath,
+    enforcerConfigPath,
+  }
+}
+
+async function startDaemon(script, configPath) {
+  const child = spawn(process.execPath, [path.join(HERE, script), '--config', configPath], {
+    cwd: REPO_ROOT,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  child.stdout.setEncoding('utf8')
+  child.stderr.setEncoding('utf8')
+  let stderr = ''
+  child.stderr.on('data', (chunk) => { stderr += chunk })
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`daemon readiness timed out: ${stderr}`)), 5000)
+    const inspect = () => {
+      if (!stderr.includes('READY ')) return
+      clearTimeout(timeout)
+      child.off('exit', exited)
+      resolve()
+    }
+    const exited = (code) => {
+      clearTimeout(timeout)
+      reject(new Error(`daemon exited before readiness (${code}): ${stderr}`))
+    }
+    child.stderr.on('data', inspect)
+    child.once('exit', exited)
+    inspect()
+  })
+  return child
+}
+
+async function stopDaemon(child) {
+  if (child.exitCode !== null) return
+  const exited = new Promise((resolve) => child.once('exit', resolve))
+  child.stdin.end()
+  await exited
+}
+
+function sendDaemonRequest(child, request) {
+  return new Promise((resolve, reject) => {
+    let buffer = ''
+    const onData = (chunk) => {
+      buffer += chunk
+      const newline = buffer.indexOf('\n')
+      if (newline === -1) return
+      cleanup()
+      try {
+        resolve(JSON.parse(buffer.slice(0, newline)))
+      } catch (error) {
+        reject(error)
+      }
+    }
+    const onExit = (code) => {
+      cleanup()
+      reject(new Error(`daemon exited while awaiting a response: ${code}`))
+    }
+    const cleanup = () => {
+      child.stdout.off('data', onData)
+      child.off('exit', onExit)
+    }
+    child.stdout.on('data', onData)
+    child.once('exit', onExit)
+    child.stdin.write(`${stableJson(request)}\n`)
+  })
+}
+
+function leaseIpcRequest(effects) {
+  return {
+    schemaVersion: 1,
+    op: 'requestLease',
+    taskId: 'task:customer-update',
+    subject: 'agent:harness',
+    requestedEffects: effects,
   }
 }
 
@@ -113,6 +245,18 @@ function protectedNetworkEffect(overrides = {}) {
   }
 }
 
+function liveStripeEffect(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    taskId: 'task:customer-update',
+    subject: 'agent:harness',
+    kind: 'network.mock.live-stripe',
+    resource: 'mock://live-stripe.local/stripe/customers/cus_demo',
+    payload: { customer_id: 'cus_demo', operation: 'update' },
+    ...overrides,
+  }
+}
+
 function fileEffect(resource, payload = 'customer payload') {
   return {
     schemaVersion: 1,
@@ -139,6 +283,18 @@ function enforcerOptions(harness, effect, lease, extra = {}) {
     mockNetworkLogPath: harness.mockNetworkLogPath,
     ...extra,
   }
+}
+
+function assertMachineCause(value, expectedType = null) {
+  assert.ok(value && typeof value === 'object' && !Array.isArray(value))
+  for (const key of ['type', 'constraint', 'blockingRecord', 'authorityState']) {
+    assert.equal(typeof value[key], 'string', `cause.${key}`)
+    assert.notEqual(value[key].length, 0, `cause.${key}`)
+  }
+  for (const key of ['authoritativeSource', 'unresolvedSource', 'detail']) {
+    assert.ok(value[key] === null || (typeof value[key] === 'string' && value[key].length > 0), `cause.${key}`)
+  }
+  if (expectedType) assert.equal(value.type, expectedType)
 }
 
 test('Global Safety Kernel stays fixed-size and V1 truth rules remain outside Adapter Spec', () => {
@@ -207,6 +363,7 @@ test('valid short-lived lease authorizes exact file and protected mock effects w
   ))
   assert.equal(file.allowed, true)
   assert.equal(file.executed, true)
+  assert.equal(file.protected, true)
   assert.equal(file.privilegeBasis, 'lease')
   assert.equal(
     fs.readFileSync(path.join(harness.workspaceRoot, 'out', 'protected', 'customer.json'), 'utf8'),
@@ -345,7 +502,7 @@ test('canonical drift, revocation read failure, ambiguous classification, and au
   assert.equal(fs.existsSync(auditHarness.mockNetworkLogPath), false)
 })
 
-test('missing dependency edge widens context, blocks issuance, and satisfies uncertainty monotonicity', () => {
+test('edge mutation with a stale digest detects graph drift and satisfies uncertainty monotonicity', () => {
   const harness = makeHarness()
   const certainProjection = projectContext(projectionOptions(harness))
   const certainLease = issueLease(harness)
@@ -379,6 +536,230 @@ test('missing dependency edge widens context, blocks issuance, and satisfies unc
   const deltaPrivilege = Number(uncertainDecision.allowed) - Number(certainDecision.allowed)
   assert.ok(deltaUncertainty >= 0)
   assert.ok(deltaPrivilege <= 0)
+})
+
+test('semantic graph completeness remains a trusted declaration when graph and digest move together', () => {
+  const harness = makeHarness()
+  const graphPath = path.join(harness.specsRoot, GRAPH)
+  const statePath = path.join(harness.specsRoot, STATE)
+  const graph = readJson(graphPath)
+  const action = graph.nodes.find((node) => node.id === 'action:customer-update')
+  action.dependsOn = action.dependsOn.filter((id) => id !== 'permission:customer-write')
+  writeJson(graphPath, graph)
+  const state = readJson(statePath)
+  state.contextGraphDigest = jsonDigest(graph)
+  writeJson(statePath, state)
+
+  const projection = projectContext(projectionOptions(harness))
+  assert.equal(graph.complete, true)
+  assert.equal(projection.uncertainty.increased, false)
+  assert.equal(projection.leaseEligible, true)
+  assert.equal(projection.nodes.some((node) => node.id === 'permission:customer-write'), false)
+})
+
+test('isolated daemons pin trust roots at startup and expose path-free IPC only', async (t) => {
+  const harness = makeHarness()
+  const issuer = await startDaemon('lease-issuer-daemon.mjs', harness.issuerConfigPath)
+  let enforcer = null
+  t.after(async () => {
+    if (enforcer) await stopDaemon(enforcer)
+    await stopDaemon(issuer)
+  })
+
+  const policyPath = path.join(harness.specsRoot, POLICY)
+  const agentPolicy = readJson(policyPath)
+  agentPolicy.taskScopes[0].allowedEffects.push({
+    kind: 'network.mock.protected',
+    resource: 'mock://protected.local/stripe/customers/cus_agent_added',
+    permission: 'permission:customer-write',
+    source: 'AGENT-SELF-AUTHORIZATION',
+  })
+  writeJson(policyPath, agentPolicy)
+
+  const rejectedExpansion = await sendDaemonRequest(issuer, leaseIpcRequest([{
+    kind: 'network.mock.protected',
+    resource: 'mock://protected.local/stripe/customers/cus_agent_added',
+  }]))
+  assert.equal(rejectedExpansion.ok, false)
+  assert.match(rejectedExpansion.error, /outside policy or ambiguous/)
+
+  const injectedPath = await sendDaemonRequest(issuer, {
+    ...leaseIpcRequest([{ kind: 'network.mock.protected', resource: 'mock://protected.local/stripe/customers/cus_demo' }]),
+    policy: policyPath,
+  })
+  assert.equal(injectedPath.ok, false)
+  assert.match(injectedPath.error, /forbidden fields: policy/)
+
+  const injectedTtl = await sendDaemonRequest(issuer, {
+    ...leaseIpcRequest([{ kind: 'network.mock.protected', resource: 'mock://protected.local/stripe/customers/cus_demo' }]),
+    ttlSeconds: 30_000,
+  })
+  assert.equal(injectedTtl.ok, false)
+  assert.match(injectedTtl.error, /forbidden fields: ttlSeconds/)
+
+  const issued = await sendDaemonRequest(issuer, leaseIpcRequest([{
+    kind: 'network.mock.protected',
+    resource: 'mock://protected.local/stripe/customers/cus_demo',
+  }]))
+  assert.equal(issued.ok, true, issued.error)
+  assert.ok(Date.parse(issued.lease.payload.expiresAt) - Date.parse(issued.lease.payload.issuedAt) <= 15_000)
+
+  enforcer = await startDaemon('effect-enforcer-daemon.mjs', harness.enforcerConfigPath)
+  const executed = await sendDaemonRequest(enforcer, {
+    schemaVersion: 1,
+    op: 'executeEffect',
+    effect: protectedNetworkEffect(),
+    lease: issued.lease,
+  })
+  assert.equal(executed.ok, true)
+  assert.equal(executed.decision.allowed, true)
+  assert.equal(executed.decision.executed, true)
+
+  const enforcerInjection = await sendDaemonRequest(enforcer, {
+    schemaVersion: 1,
+    op: 'executeEffect',
+    effect: protectedNetworkEffect(),
+    lease: issued.lease,
+    publicKey: harness.publicKeyPath,
+  })
+  assert.equal(enforcerInjection.ok, false)
+  assert.match(enforcerInjection.error, /forbidden fields: publicKey/)
+
+  const sameIdentityPath = path.join(harness.isolatedRoot, 'same-identity-config.json')
+  const sameIdentity = readJson(harness.issuerConfigPath)
+  sameIdentity.agentIdentity.uid = process.getuid()
+  writeJson(sameIdentityPath, sameIdentity)
+  fs.chmodSync(sameIdentityPath, 0o600)
+  assert.throws(() => loadIssuerDaemonConfig(sameIdentityPath), /distinct OS identities/)
+
+  const trustedPolicy = path.join(harness.snapshotRoot, POLICY)
+  assert.equal(fs.statSync(trustedPolicy).mode & 0o222, 0)
+  assert.equal(fs.statSync(harness.privateKeyPath).mode & 0o077, 0)
+  if (process.getuid() === 0) {
+    const attemptedWrite = spawnSync(process.execPath, ['-e', "require('node:fs').appendFileSync(process.argv[1], 'x')", trustedPolicy], {
+      uid: harness.agentIdentity.uid,
+      gid: harness.agentIdentity.gid,
+      encoding: 'utf8',
+    })
+    assert.notEqual(attemptedWrite.status, 0, 'the configured agent OS identity must not write the trusted snapshot')
+    const attemptedKeyRead = spawnSync(process.execPath, ['-e', "require('node:fs').readFileSync(process.argv[1])", harness.privateKeyPath], {
+      uid: harness.agentIdentity.uid,
+      gid: harness.agentIdentity.gid,
+      encoding: 'utf8',
+    })
+    assert.notEqual(attemptedKeyRead.status, 0, 'the configured agent OS identity must not read the issuer private key')
+  }
+})
+
+test('G-17 blocks live Stripe mock issuance and defeats a correctly signed over-authorizing lease', async (t) => {
+  const harness = makeHarness()
+  const issuer = await startDaemon('lease-issuer-daemon.mjs', harness.issuerConfigPath)
+  const enforcer = await startDaemon('effect-enforcer-daemon.mjs', harness.enforcerConfigPath)
+  t.after(async () => {
+    await stopDaemon(enforcer)
+    await stopDaemon(issuer)
+  })
+
+  const issuance = await sendDaemonRequest(issuer, leaseIpcRequest([{
+    kind: 'network.mock.live-stripe',
+    resource: 'mock://live-stripe.local/stripe/customers/cus_demo',
+  }]))
+  assert.equal(issuance.ok, false)
+  assert.equal(issuance.error, 'effect_blocked_by_unresolved_authority')
+  assertMachineCause(issuance.cause, 'unresolved')
+  assert.equal(issuance.cause.constraint, 'NO_LIVE_STRIPE')
+  assert.equal(issuance.cause.blockingRecord, 'G-17')
+  assert.equal(issuance.cause.authorityState, 'unresolved')
+
+  const trustedPolicy = readJson(path.join(harness.snapshotRoot, POLICY))
+  assert.ok(trustedPolicy.taskScopes[0].allowedEffects.some((effect) => effect.kind === 'network.mock.live-stripe'))
+
+  const lease = issueLease(harness)
+  lease.payload.allowedEffects.push({
+    kind: 'network.mock.live-stripe',
+    resource: 'mock://live-stripe.local/stripe/customers/cus_demo',
+    permission: 'permission:customer-write',
+  })
+  const signingKey = crypto.createPrivateKey(fs.readFileSync(harness.privateKeyPath))
+  lease.signature = crypto.sign(null, Buffer.from(stableJson(lease.payload)), signingKey).toString('base64url')
+  const verificationKey = crypto.createPublicKey(fs.readFileSync(harness.publicKeyPath))
+  assert.equal(
+    crypto.verify(null, Buffer.from(stableJson(lease.payload)), verificationKey, Buffer.from(lease.signature, 'base64url')),
+    true,
+  )
+
+  const enforcement = await sendDaemonRequest(enforcer, {
+    schemaVersion: 1,
+    op: 'executeEffect',
+    effect: liveStripeEffect(),
+    lease,
+  })
+  assert.equal(enforcement.ok, true)
+  assert.equal(enforcement.decision.allowed, false)
+  assert.equal(enforcement.decision.executed, false)
+  assert.equal(enforcement.decision.reason, 'effect_blocked_by_unresolved_authority')
+  assertMachineCause(enforcement.decision.cause, 'unresolved')
+  assert.equal(enforcement.decision.cause.blockingRecord, 'G-17')
+  assert.equal(fs.existsSync(harness.mockNetworkLogPath), false)
+})
+
+test('protected file classification rejects any baseline overlap before authorization', () => {
+  const harness = makeHarness()
+  const lease = issueLease(harness)
+  const policyPath = path.join(harness.specsRoot, POLICY)
+  const policy = readJson(policyPath)
+  policy.baseline[0].resourcePrefix = 'out/'
+  writeJson(policyPath, policy)
+
+  const decision = interceptEffect(enforcerOptions(
+    harness,
+    fileEffect('out/protected/customer.json', 'must remain denied'),
+    lease,
+  ))
+  assert.equal(decision.allowed, false)
+  assert.equal(decision.executed, false)
+  assert.match(decision.reason, /control_plane_unavailable:baseline overlaps protected file prefix/)
+  assertMachineCause(decision.cause, 'infrastructure')
+  assert.equal(fs.existsSync(path.join(harness.workspaceRoot, 'out', 'protected', 'customer.json')), false)
+
+  persistProjection(harness)
+  const issuer = runIssuer(harness)
+  assert.notEqual(issuer.status, 0)
+  assert.match(issuer.stderr, /baseline overlaps protected file prefix/)
+})
+
+test('every denied effect and recorded denial has machine-readable provenance', () => {
+  const authorizationHarness = makeHarness()
+  const authorization = interceptEffect(enforcerOptions(authorizationHarness, protectedNetworkEffect(), null))
+
+  const unresolvedHarness = makeHarness()
+  const unresolved = interceptEffect(enforcerOptions(unresolvedHarness, liveStripeEffect(), null))
+
+  const classificationHarness = makeHarness()
+  const classification = interceptEffect(enforcerOptions(
+    classificationHarness,
+    protectedNetworkEffect({ resource: 'mock://protected.local/stripe/customers/cus_demo?ambiguous=1' }),
+    null,
+  ))
+
+  const infrastructureHarness = makeHarness()
+  fs.rmSync(infrastructureHarness.revocationsPath)
+  const infrastructure = interceptEffect(enforcerOptions(infrastructureHarness, protectedNetworkEffect(), null))
+
+  const cases = [
+    [authorizationHarness, authorization, 'authorization'],
+    [unresolvedHarness, unresolved, 'unresolved'],
+    [classificationHarness, classification, 'classification'],
+    [infrastructureHarness, infrastructure, 'infrastructure'],
+  ]
+  for (const [harness, decision, type] of cases) {
+    assert.equal(decision.allowed, false)
+    assertMachineCause(decision.cause, type)
+    const events = fs.readFileSync(harness.auditPath, 'utf8').trim().split('\n').map(JSON.parse)
+    assert.equal(events.length, 1)
+    assert.equal(events[0].decision, 'deny')
+    assertMachineCause(events[0].cause, type)
+  }
 })
 
 test('issuer isolation rejects downtime, workspace keys, issuer-owned request fields, and scope expansion', () => {
