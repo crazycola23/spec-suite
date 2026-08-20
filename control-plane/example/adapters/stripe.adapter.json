@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "adapterId": "adapter:stripe",
+  "provider": "stripe",
+  "authorityClass": "adapter-spec-only",
+  "coreContractAuthority": false,
+  "fieldMappings": [
+    {
+      "externalField": "customer",
+      "canonicalField": "customer_id",
+      "direction": "inbound"
+    }
+  ],
+  "effectMappings": [
+    {
+      "action": "action:customer-update",
+      "providerOperation": "customers.update",
+      "classification": "protected",
+      "evalTarget": "mock://protected.local/stripe/customers/cus_demo"
+    }
+  ]
+}

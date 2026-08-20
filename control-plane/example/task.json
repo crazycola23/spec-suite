@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "taskId": "task:customer-update",
+  "roots": [
+    "action:customer-update"
+  ],
+  "candidateRoots": [
+    "file:stripe-adapter"
+  ],
+  "surfaces": [
+    "file.write:out/protected/customer.json",
+    "network.mock.protected:stripe.customer.update"
+  ]
+}

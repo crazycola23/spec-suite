@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "canonicalInputs": [
+    "control-plane/global-safety-kernel.md",
+    "control-plane/example/adapters/stripe.adapter.json",
+    "control-plane/example/canonical-facts.json",
+    "control-plane/example/rules.md"
+  ],
+  "canonicalRevision": "sha256:b60f30b316237512a790688d48a041af19fff91ad51068e0c413fc7eeb2eabe8",
+  "contextGraphDigest": "sha256:9d32f88f1dc8233f23f87b3d60d6990704bf2e8a350bc63d955e9e447e67e0bf",
+  "activeConstraints": [
+    "gap:G-17"
+  ]
+}

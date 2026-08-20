@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "taskId": "task:customer-update",
+  "subject": "agent:harness",
+  "ttlSeconds": 15,
+  "effects": [
+    {
+      "kind": "file.write",
+      "resource": "out/protected/customer.json"
+    },
+    {
+      "kind": "network.mock.protected",
+      "resource": "mock://protected.local/stripe/customers/cus_demo"
+    }
+  ]
+}
