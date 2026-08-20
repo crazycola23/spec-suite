@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * Minimal effect interceptor for the V2 control-plane slice.
+ * Effect enforcement core plus a single-process protocol-eval CLI.
  *
  * Allowed(E) = Baseline(E) OR LeaseAuthorizes(E)
  * Protected(E) AND NOT LeaseAuthorizes(E) => Deny(E)
  *
- * This intentionally recognizes only repository-relative file writes and one
- * local protected mock-network class. Unknown or ambiguous effects fail closed.
+ * The isolated entry point is effect-enforcer-daemon.mjs. This core recognizes
+ * repository-relative file writes and two local mock-network classes. Unknown
+ * or ambiguous effects fail closed.
  */
 
 import crypto from 'node:crypto'
@@ -18,11 +19,14 @@ import { pathToFileURL } from 'node:url'
 import {
   assertSchemaVersion,
   authorizedEffectKey,
+  blockedEffectCause,
   canonicalAuthorizedEffect,
   computeCanonicalRevision,
   contentDigest,
+  denialCause,
   effectReferenceKey,
   jsonDigest,
+  loadAuthorityRecords,
   parseInstant,
   readJson,
   resolveInside,
@@ -30,6 +34,7 @@ import {
   stableJson,
   stringSet,
   toPosix,
+  validatePolicyFileRules,
 } from './control-plane-common.mjs'
 
 function parseArgs(argv) {
@@ -88,6 +93,13 @@ function normalizeFileResource(resource, workspaceRoot) {
   }
   const absolute = resolveInside(workspaceRoot, normalized, 'file effect resource')
   let current = path.resolve(workspaceRoot)
+  let rootStat
+  try {
+    rootStat = fs.lstatSync(current)
+  } catch (error) {
+    throw new Error(`workspace root is unavailable: ${error.message}`)
+  }
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error('workspace root is not a stable directory')
   for (const segment of path.relative(current, absolute).split(path.sep).filter(Boolean)) {
     current = path.join(current, segment)
     if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) {
@@ -97,20 +109,21 @@ function normalizeFileResource(resource, workspaceRoot) {
   return { resource: toPosix(path.relative(workspaceRoot, absolute)), absolute }
 }
 
-function normalizeProtectedMockResource(resource) {
+function normalizeMockResource(resource, hostname, label) {
   let parsed
   try {
     parsed = new URL(resource)
   } catch {
     throw new Error('mock network resource is not a URL')
   }
-  if (parsed.protocol !== 'mock:' || parsed.hostname !== 'protected.local' || parsed.port !== '') {
-    throw new Error('mock network resource is outside the protected local provider')
+  if (parsed.protocol !== 'mock:' || parsed.hostname !== hostname || parsed.port !== '') {
+    throw new Error(`mock network resource is outside the ${label} provider`)
   }
   if (parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new Error('mock network resource contains ambiguous URL components')
   }
-  if (parsed.href !== resource || !/^mock:\/\/protected\.local\/[A-Za-z0-9/_-]+$/.test(resource)) {
+  const escapedHostname = hostname.replaceAll('.', '\\.')
+  if (parsed.href !== resource || !(new RegExp(`^mock:\\/\\/${escapedHostname}\\/[A-Za-z0-9/_-]+$`)).test(resource)) {
     throw new Error('mock network resource is not canonical')
   }
   let decoded
@@ -125,18 +138,23 @@ function normalizeProtectedMockResource(resource) {
   return parsed.href
 }
 
-export function classifyEffect(effect, workspaceRoot) {
+export function classifyEffect(effect, workspaceRoot, policy) {
   if (!effect || typeof effect !== 'object' || Array.isArray(effect)) throw new Error('effect must be an object')
   requireIdentity(effect)
   if (effect.kind === 'file.write') {
     const normalized = normalizeFileResource(effect.resource, workspaceRoot)
+    const { protectedRules } = validatePolicyFileRules(policy)
+    const matches = protectedRules.filter((rule) => normalized.resource.startsWith(rule.prefix))
+    if (matches.length > 1) throw new Error('file protection classification is ambiguous')
+    const protection = matches[0] ?? null
     return {
       taskId: effect.taskId,
       subject: effect.subject,
       kind: effect.kind,
       resource: normalized.resource,
       absolute: normalized.absolute,
-      protected: false,
+      protected: protection !== null,
+      protection,
       payload: effect.payload,
     }
   }
@@ -145,28 +163,34 @@ export function classifyEffect(effect, workspaceRoot) {
       taskId: effect.taskId,
       subject: effect.subject,
       kind: effect.kind,
-      resource: normalizeProtectedMockResource(effect.resource),
+      resource: normalizeMockResource(effect.resource, 'protected.local', 'protected local'),
       absolute: null,
       protected: true,
+      protection: {
+        constraint: 'PROTECTED_MOCK_NETWORK',
+        permission: 'permission:customer-write',
+        source: 'CP-PERM-001',
+      },
+      payload: effect.payload,
+    }
+  }
+  if (effect.kind === 'network.mock.live-stripe') {
+    return {
+      taskId: effect.taskId,
+      subject: effect.subject,
+      kind: effect.kind,
+      resource: normalizeMockResource(effect.resource, 'live-stripe.local', 'live Stripe mock'),
+      absolute: null,
+      protected: true,
+      protection: {
+        constraint: 'NO_LIVE_STRIPE',
+        permission: 'permission:customer-write',
+        source: 'CP-PERM-001',
+      },
       payload: effect.payload,
     }
   }
   throw new Error('effect kind is not classified')
-}
-
-function validateBaselineRule(rule) {
-  if (rule?.kind !== 'file.write' || typeof rule.resourcePrefix !== 'string') {
-    throw new Error('policy baseline contains an unclassified rule')
-  }
-  const prefix = rule.resourcePrefix
-  if (!prefix.endsWith('/') || prefix.includes('\\') || path.posix.isAbsolute(prefix)) {
-    throw new Error('policy baseline file prefix is invalid')
-  }
-  const normalized = path.posix.normalize(prefix)
-  if (normalized !== prefix || normalized === '../' || normalized.startsWith('../')) {
-    throw new Error('policy baseline file prefix escapes the workspace')
-  }
-  return prefix
 }
 
 function loadControlPlane(options) {
@@ -201,8 +225,9 @@ function loadControlPlane(options) {
   for (const key of ['issuer', 'keyId']) {
     if (typeof policy[key] !== 'string' || policy[key].trim() === '') throw new Error(`policy ${key} is unavailable`)
   }
-  if (!Array.isArray(policy.baseline) || !Array.isArray(policy.taskScopes)) throw new Error('policy rules are unavailable')
-  policy.baseline.forEach(validateBaselineRule)
+  if (!Array.isArray(policy.taskScopes)) throw new Error('policy rules are unavailable')
+  const fileRules = validatePolicyFileRules(policy)
+  const authorityRecords = loadAuthorityRecords(specsRoot, state)
   const taskIds = []
   for (const [index, scope] of policy.taskScopes.entries()) {
     if (typeof scope?.taskId !== 'string' || scope.taskId.trim() === '') throw new Error(`policy taskScopes[${index}] has no task ID`)
@@ -211,9 +236,13 @@ function loadControlPlane(options) {
     stringSet(scope.requiredRoots ?? [], `policy taskScopes[${index}] required roots`, { allowEmpty: false })
     stringSet(scope.requiredSurfaces ?? [], `policy taskScopes[${index}] required surfaces`, { allowEmpty: false })
     stringSet(scope.requiredConstraints ?? [], `policy taskScopes[${index}] required constraints`)
-    const effects = (scope.allowedEffects ?? []).map((effect, effectIndex) => (
-      canonicalAuthorizedEffect(effect, `policy taskScopes[${index}].allowedEffects[${effectIndex}]`)
-    ))
+    const effects = (scope.allowedEffects ?? []).map((effect, effectIndex) => {
+      const normalized = canonicalAuthorizedEffect(effect, `policy taskScopes[${index}].allowedEffects[${effectIndex}]`)
+      if (typeof effect.source !== 'string' || effect.source.trim() === '') {
+        throw new Error(`policy taskScopes[${index}].allowedEffects[${effectIndex}].source must be non-empty`)
+      }
+      return normalized
+    })
     if (effects.length === 0) throw new Error(`policy taskScopes[${index}] has no allowed effects`)
     const effectKeys = effects.map(authorizedEffectKey)
     if (new Set(effectKeys).size !== effectKeys.length) throw new Error(`policy taskScopes[${index}] has duplicate effects`)
@@ -228,7 +257,7 @@ function loadControlPlane(options) {
     throw new Error(`trusted public key is unavailable: ${error.message}`)
   }
   if (publicKey.asymmetricKeyType !== 'ed25519') throw new Error('trusted public key must be Ed25519')
-  return { graph, state, policy, revokedLeaseIds, publicKey }
+  return { graph, state, policy, fileRules, authorityRecords, revokedLeaseIds, publicKey }
 }
 
 function taskScopeFor(policy, taskId, subject) {
@@ -239,9 +268,13 @@ function taskScopeFor(policy, taskId, subject) {
   if (!stringSet(scope.subjects ?? [], 'task scope subjects', { allowEmpty: false }).includes(subject)) {
     throw new Error('subject is outside the task scope')
   }
-  const effects = (scope.allowedEffects ?? []).map((effect, index) => (
-    canonicalAuthorizedEffect(effect, `task scope allowedEffects[${index}]`)
-  ))
+  const effects = (scope.allowedEffects ?? []).map((effect, index) => {
+    const normalized = canonicalAuthorizedEffect(effect, `task scope allowedEffects[${index}]`)
+    if (typeof effect.source !== 'string' || effect.source.trim() === '') {
+      throw new Error(`task scope allowedEffects[${index}].source must be non-empty`)
+    }
+    return { ...normalized, source: effect.source }
+  })
   const keys = effects.map(authorizedEffectKey)
   if (new Set(keys).size !== keys.length) throw new Error('task scope contains duplicate effects')
   return { scope, effects }
@@ -254,13 +287,32 @@ function policyEffectFor(classified, effects) {
 }
 
 function baselineAuthorizes(policy, classified) {
-  if (!Array.isArray(policy.baseline)) throw new Error('policy baseline is unavailable')
-  let allowed = false
-  for (const rule of policy.baseline) {
-    const prefix = validateBaselineRule(rule)
-    if (classified.kind === 'file.write' && classified.resource.startsWith(prefix)) allowed = true
-  }
-  return allowed
+  const matches = policy.baseline.filter((rule) => (
+    classified.kind === 'file.write' && classified.resource.startsWith(rule.resourcePrefix)
+  ))
+  if (matches.length > 1) throw new Error('baseline classification is ambiguous')
+  return matches[0] ?? null
+}
+
+function infrastructureCause(constraint, blockingRecord, detail) {
+  return denialCause({
+    type: 'infrastructure',
+    constraint,
+    blockingRecord,
+    authorityState: 'unavailable',
+    detail,
+  })
+}
+
+function authorizationCause(reason, classified, policyEffect = null) {
+  return denialCause({
+    type: 'authorization',
+    constraint: classified?.protection?.constraint ?? 'LEASE_AUTHORIZES_EFFECT',
+    blockingRecord: 'context-lease',
+    authorityState: 'authoritative',
+    authoritativeSource: policyEffect?.source ?? classified?.protection?.source ?? 'CP-LEASE-001',
+    detail: reason,
+  })
 }
 
 function verifyLease(lease, control, classified, now) {
@@ -318,9 +370,15 @@ function verifyLease(lease, control, classified, now) {
     if (!sameStrings(payload.permissions, expectedPermissions) || !payload.permissions.includes(policyEffect.permission)) {
       throw new Error('lease_permission_scope_invalid')
     }
-    return { authorized: true, reason: 'lease_authorized', leaseId: payload.leaseId, policyEffect }
+    return { authorized: true, reason: 'lease_authorized', leaseId: payload.leaseId, policyEffect, cause: null }
   } catch (error) {
-    return { authorized: false, reason: error.message, leaseId: lease?.payload?.leaseId ?? null, policyEffect: null }
+    return {
+      authorized: false,
+      reason: error.message,
+      leaseId: lease?.payload?.leaseId ?? null,
+      policyEffect: null,
+      cause: authorizationCause(error.message, classified),
+    }
   }
 }
 
@@ -339,15 +397,30 @@ export function evaluateEffect(options) {
       leaseId: options.lease?.payload?.leaseId ?? null,
       canonicalRevision: null,
       policyEpoch: null,
+      cause: infrastructureCause('CONTROL_PLANE_AVAILABLE', 'control-plane', error.message),
     }
   }
 
   let classified
-  let baseline = false
-  let leaseResult = { authorized: false, reason: 'lease_missing', leaseId: null }
+  let baselineRule = null
+  let leaseResult = { authorized: false, reason: 'lease_missing', leaseId: null, cause: null }
   try {
-    classified = classifyEffect(options.effect, workspaceRoot)
-    baseline = baselineAuthorizes(control.policy, classified)
+    classified = classifyEffect(options.effect, workspaceRoot, control.policy)
+    const unresolved = blockedEffectCause(control.state, control.authorityRecords, classified)
+    if (unresolved) {
+      return {
+        allowed: false,
+        reason: 'effect_blocked_by_unresolved_authority',
+        privilegeBasis: null,
+        protected: classified.protected,
+        classified,
+        leaseId: options.lease?.payload?.leaseId ?? null,
+        canonicalRevision: control.state.canonicalRevision,
+        policyEpoch: control.policy.policyEpoch,
+        cause: unresolved,
+      }
+    }
+    baselineRule = baselineAuthorizes(control.policy, classified)
     leaseResult = verifyLease(options.lease, control, classified, options.now ?? Date.now())
   } catch (error) {
     return {
@@ -359,16 +432,25 @@ export function evaluateEffect(options) {
       leaseId: options.lease?.payload?.leaseId ?? null,
       canonicalRevision: control.state.canonicalRevision,
       policyEpoch: control.policy.policyEpoch,
+      cause: denialCause({
+        type: 'classification',
+        constraint: 'EFFECT_CLASSIFIED',
+        blockingRecord: 'effect-classifier',
+        authorityState: 'unresolved',
+        detail: error.message,
+      }),
     }
   }
 
-  let allowed = baseline || leaseResult.authorized
-  let reason = baseline ? 'baseline_authorized' : leaseResult.reason
-  let privilegeBasis = baseline ? 'baseline' : (leaseResult.authorized ? 'lease' : null)
+  let allowed = baselineRule !== null || leaseResult.authorized
+  let reason = baselineRule ? 'baseline_authorized' : leaseResult.reason
+  let privilegeBasis = baselineRule ? 'baseline' : (leaseResult.authorized ? 'lease' : null)
+  let cause = allowed ? null : leaseResult.cause
   if (classified.protected && !leaseResult.authorized) {
     allowed = false
     reason = leaseResult.reason
     privilegeBasis = null
+    cause = leaseResult.cause ?? authorizationCause(reason, classified)
   }
   return {
     allowed,
@@ -379,6 +461,7 @@ export function evaluateEffect(options) {
     leaseId: leaseResult.leaseId,
     canonicalRevision: control.state.canonicalRevision,
     policyEpoch: control.policy.policyEpoch,
+    cause,
   }
 }
 
@@ -398,6 +481,7 @@ function auditEvent(decision, effect, now) {
     leaseId: decision.leaseId,
     canonicalRevision: decision.canonicalRevision,
     policyEpoch: decision.policyEpoch,
+    cause: decision.cause,
   }
 }
 
@@ -416,7 +500,7 @@ function executeAuthorizedEffect(decision, options) {
     fs.writeFileSync(effect.absolute, effect.payload, 'utf8')
     return { kind: effect.kind, bytes: Buffer.byteLength(effect.payload), sha256: contentDigest(effect.payload) }
   }
-  if (effect.kind === 'network.mock.protected') {
+  if (effect.kind === 'network.mock.protected' || effect.kind === 'network.mock.live-stripe') {
     if (!options.mockNetworkLogPath) throw new Error('mock network sink is unavailable')
     const sink = path.resolve(options.mockNetworkLogPath)
     fs.mkdirSync(path.dirname(sink), { recursive: true })
@@ -440,7 +524,13 @@ export function interceptEffect(options) {
     appendAudit(options.auditPath, event)
   } catch (error) {
     if (decision.allowed) {
-      decision = { ...decision, allowed: false, reason: `audit_unavailable:${error.message}`, privilegeBasis: null }
+      decision = {
+        ...decision,
+        allowed: false,
+        reason: `audit_unavailable:${error.message}`,
+        privilegeBasis: null,
+        cause: infrastructureCause('AUDIT_AVAILABLE', 'audit-sink', error.message),
+      }
     }
     return { ...decision, executed: false, result: null, auditRecorded: false }
   }
@@ -449,7 +539,15 @@ export function interceptEffect(options) {
     const result = executeAuthorizedEffect(decision, options)
     return { ...decision, executed: true, result, auditRecorded: true }
   } catch (error) {
-    return { ...decision, executed: false, result: null, reason: `effect_execution_failed:${error.message}`, auditRecorded: true }
+    return {
+      ...decision,
+      allowed: false,
+      executed: false,
+      result: null,
+      reason: `effect_execution_failed:${error.message}`,
+      cause: infrastructureCause('EFFECT_EXECUTABLE', 'effect-adapter', error.message),
+      auditRecorded: true,
+    }
   }
 }
 

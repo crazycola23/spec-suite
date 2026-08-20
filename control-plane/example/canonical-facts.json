@@ -12,8 +12,15 @@
       "code": "G-17",
       "missing": "Whether live Stripe customer mutation is permitted",
       "status": "open",
+      "authorityState": "unresolved",
       "blocks": [
-        "network.live.stripe"
+        {
+          "constraint": "NO_LIVE_STRIPE",
+          "effect": {
+            "kind": "network.mock.live-stripe",
+            "resource": "mock://live-stripe.local/stripe/customers/cus_demo"
+          }
+        }
       ],
       "protectiveDefault": "local_mock_only",
       "protectiveDefaultSource": "CP-G17-001"

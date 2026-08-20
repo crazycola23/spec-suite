@@ -92,6 +92,12 @@
       "include": [
         "gap:G-17"
       ]
+    },
+    {
+      "surface": "network.mock.live-stripe:stripe.customer.update",
+      "include": [
+        "gap:G-17"
+      ]
     }
   ]
 }

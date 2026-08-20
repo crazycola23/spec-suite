@@ -30,6 +30,20 @@ CLAUDE.md generated region   contract-bundle.json + manifest.json
 
 V1 特意只证明边界和确定性：一个真实 Claude adapter、一个语言无关 JSON bundle、一个按 manifest / 文件集合 / 字节工作的 consumer verifier。它不提前承诺多语言代码生成、SemVer 兼容、`specHash` 或 breaking-change 语义。
 
+## V2/V2.5 control-plane 纵切
+
+V1 Truth Integrity 保持冻结；新增控制面位于独立的 [`control-plane/`](./control-plane/)：
+
+- 固定 `<500 tokens` 的 Global Safety Kernel；
+- deterministic context projection：`Kernel ∪ Closure(Roots(T)) ∪ Blockers(Surface(T))`；
+- 由隔离 OS identity 运行、启动时固定 trust roots 的 issuer/enforcer daemon；
+- policy-owned TTL、Ed25519 短期 Lease 与 path-free JSONL IPC；
+- 显式 protected file classification，以及 `baseline ∩ protected = ∅` 的 fail-closed 检查；
+- `G-17 unresolved → live Stripe mock effect blocked → issuer deny → enforcer deny` 的机器链；
+- 带 `constraint`、`blockingRecord`、`authorityState` 和 source 的结构化 denial provenance。
+
+这仍是最小 adversarial vertical slice，不是真实 Stripe 或完整 sandbox framework。它检测 graph 声明不完整和 digest drift，但不声称证明 semantic graph completeness；可信时间源、ACL/capability 审计、MAC/container/eBPF 仍在边界之外。完整模型与 eval 见 [`control-plane/README.md`](./control-plane/README.md)。
+
 ## 两种模式
 
 **轻量模式**适用于普通仓库里的单个无依据事实。只创建 `.spec-suite/unresolved.yaml`，不引入完整规格基础设施。若项目以后采用 spec-suite，同一事实可单向、幂等升级为一个 `G-*`。
@@ -71,6 +85,7 @@ generator 是 fail-closed：canonical input 缺失、无法解析、source 指�
 - [`DISCIPLINES.md`](./DISCIPLINES.md)：Canonical Agent Entry Contract 与平台 adapter 两区制。
 - [`SCHEMA.md`](./SCHEMA.md)：持久化协议、canonical schema、bundle/manifest、config 与 audit。
 - [`templates/`](./templates/)：lightweight、L0–L3 与 contract scaffolds。
+- [`control-plane/`](./control-plane/)：V2/V2.5 projection、Lease、authority blocker 与 protected effect 纵切。
 - [`scripts/`](./scripts/)：guard、migration、checker/fixer、generator、consumer verifier 和测试夹具。
 
 ## 验证
@@ -80,7 +95,7 @@ npm install
 npm test
 ```
 
-测试覆盖幂等迁移、重复任务保持 unresolved、adapter 手写区保护、确定性生成、三类 fail-closed 路径，以及 consumer 副本的 manifest / 文件集合 / 字节校验。
+测试覆盖幂等迁移、重复任务保持 unresolved、adapter 手写区保护、确定性生成、三类 V1 fail-closed 路径、consumer 副本校验，以及 V2 的 trust-root 注入、self-authorization、Lease tampering/replay/expiry/revocation、G-17 bypass、protected/baseline overlap、symlink escape、classifier/audit failure 和 denial provenance。
 
 ## 设计边界
 
@@ -89,3 +104,5 @@ npm test
 - 共同 Agent 纪律从一个 canonical source 投影；平台特有规则留在 adapter 手写区。
 - regex/heuristic checker 保持便宜和透明；只有真实误报/漏报案例足够多时才升级 parser。
 - Action SHA pinning 属于 hardening，不冒充 V1 correctness。
+- Context projection 只增加知识，不授予权限；dependency uncertainty 增加时 privilege 只能保持或下降。
+- `complete: true` 是受信声明；同步修改 graph 与 digest 不等于证明依赖图语义完备。

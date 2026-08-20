@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Isolated lease issuer for the minimal V2 control-plane slice.
+ * Lease issuance core plus a single-process protocol-eval CLI.
  *
- * Run this process under a separate identity. The Ed25519 private key MUST live
- * outside the agent-readable specs root. Requests may ask for scope; the issuer
- * independently recomputes context and only signs an exact subset of policy.
+ * The real privilege boundary is lease-issuer-daemon.mjs, run under a separate
+ * identity with fixed trust roots. This CLI still keeps its Ed25519 key outside
+ * the specs root, recomputes context, and signs only an exact policy subset.
  */
 
 import crypto from 'node:crypto'
@@ -16,15 +16,19 @@ import { pathToFileURL } from 'node:url'
 import {
   assertSchemaVersion,
   authorizedEffectKey,
+  blockedEffectCause,
   canonicalAuthorizedEffect,
   canonicalEffectReference,
+  ControlPlaneDenial,
   effectReferenceKey,
   jsonDigest,
+  loadAuthorityRecords,
   readJson,
   resolveInside,
   sameStrings,
   stableJson,
   stringSet,
+  validatePolicyFileRules,
   writeJsonAtomic,
 } from './control-plane-common.mjs'
 import { projectContext } from './project-context.mjs'
@@ -111,6 +115,10 @@ function validatePolicy(policy, taskId, subject) {
   if (!Number.isSafeInteger(policy.maxTtlSeconds) || policy.maxTtlSeconds < 1) {
     throw new Error('issuer policy.maxTtlSeconds must be a positive integer')
   }
+  if (!Number.isSafeInteger(policy.leaseTtlSeconds) || policy.leaseTtlSeconds < 1 || policy.leaseTtlSeconds > policy.maxTtlSeconds) {
+    throw new Error('issuer policy.leaseTtlSeconds must be within maxTtlSeconds')
+  }
+  validatePolicyFileRules(policy)
   for (const key of ['issuer', 'keyId']) {
     if (typeof policy[key] !== 'string' || policy[key].trim() === '') throw new Error(`issuer policy.${key} must be non-empty`)
   }
@@ -120,9 +128,13 @@ function validatePolicy(policy, taskId, subject) {
   const scope = matches[0]
   const subjects = stringSet(scope.subjects ?? [], 'task scope subjects', { allowEmpty: false })
   if (!subjects.includes(subject)) throw new Error('subject is outside the task scope')
-  const allowedEffects = (scope.allowedEffects ?? []).map((effect, index) => (
-    canonicalAuthorizedEffect(effect, `task scope allowedEffects[${index}]`)
-  ))
+  const allowedEffects = (scope.allowedEffects ?? []).map((effect, index) => {
+    const normalized = canonicalAuthorizedEffect(effect, `task scope allowedEffects[${index}]`)
+    if (typeof effect.source !== 'string' || effect.source.trim() === '') {
+      throw new Error(`task scope allowedEffects[${index}].source must be non-empty`)
+    }
+    return normalized
+  })
   if (allowedEffects.length === 0) throw new Error('task scope has no allowed effects')
   const keys = allowedEffects.map(authorizedEffectKey)
   if (new Set(keys).size !== keys.length) throw new Error('task scope contains duplicate allowed effects')
@@ -177,18 +189,27 @@ function validateProjection({ supplied, recomputed, state, policy, scope }) {
   if (supplied.projectionDigest !== jsonDigest(unsigned)) throw new Error('projection self-digest is invalid')
 }
 
-function issueLease({ options, now = Date.now() }) {
-  const specsRoot = path.resolve(options.specsRoot ?? '.')
-  for (const key of ['graph', 'task', 'state', 'policy', 'projection', 'request']) {
-    if (!options[key]) throw new Error(`missing --${key}`)
+export function issueLeaseFromTrustedInputs({
+  specsRoot: configuredRoot,
+  graph,
+  task,
+  state: statePath,
+  policy: policyPath,
+  privateKey,
+  request,
+  suppliedProjection = null,
+  now = Date.now(),
+}) {
+  const specsRoot = path.resolve(configuredRoot ?? '.')
+  for (const [key, value] of Object.entries({ graph, task, state: statePath, policy: policyPath })) {
+    if (!value) throw new Error(`trusted ${key} path is unavailable`)
   }
-  const inputs = Object.fromEntries(['graph', 'task', 'state', 'policy', 'projection', 'request'].map((key) => [
+  const inputs = Object.fromEntries(Object.entries({ graph, task, state: statePath, policy: policyPath }).map(([key, value]) => [
     key,
-    resolveInside(specsRoot, options[key], `--${key}`),
+    resolveInside(specsRoot, value, `trusted ${key} path`),
   ]))
   const state = readJson(inputs.state, 'canonical state')
   const policy = readJson(inputs.policy, 'issuer policy')
-  const request = readJson(inputs.request, 'lease request')
   assertSchemaVersion(state, 'canonical state')
   const requestedEffects = validateRequest(request)
   const { scope, allowedEffects } = validatePolicy(policy, request.taskId, request.subject)
@@ -196,16 +217,21 @@ function issueLease({ options, now = Date.now() }) {
 
   const recomputed = projectContext({
     specsRoot,
-    graph: options.graph,
-    task: options.task,
-    state: options.state,
-    policy: options.policy,
+    graph,
+    task,
+    state: statePath,
+    policy: policyPath,
   })
-  const supplied = readJson(inputs.projection, 'context projection')
+  const supplied = suppliedProjection ?? recomputed
   validateProjection({ supplied, recomputed, state, policy, scope })
   if (recomputed.taskId !== request.taskId) throw new Error('request task does not match the trusted task projection')
   const effects = selectEffects(requestedEffects, allowedEffects)
-  const privateKey = readPrivateKey(specsRoot, options.privateKey)
+  const authorityRecords = loadAuthorityRecords(specsRoot, state)
+  for (const effect of effects) {
+    const cause = blockedEffectCause(state, authorityRecords, effect)
+    if (cause) throw new ControlPlaneDenial('effect_blocked_by_unresolved_authority', cause)
+  }
+  const signingKey = readPrivateKey(specsRoot, privateKey)
 
   const issuedAt = new Date(now).toISOString()
   const expiresAt = new Date(now + request.ttlSeconds * 1000).toISOString()
@@ -228,7 +254,7 @@ function issueLease({ options, now = Date.now() }) {
     permissions: [...new Set(effects.map((effect) => effect.permission))].sort(),
     allowedEffects: effects,
   }
-  const signature = crypto.sign(null, Buffer.from(stableJson(payload)), privateKey).toString('base64url')
+  const signature = crypto.sign(null, Buffer.from(stableJson(payload)), signingKey).toString('base64url')
   return {
     schemaVersion: 1,
     alg: 'Ed25519',
@@ -236,6 +262,26 @@ function issueLease({ options, now = Date.now() }) {
     payload,
     signature,
   }
+}
+
+function issueLease({ options, now = Date.now() }) {
+  const specsRoot = path.resolve(options.specsRoot ?? '.')
+  for (const key of ['graph', 'task', 'state', 'policy', 'projection', 'request']) {
+    if (!options[key]) throw new Error(`missing --${key}`)
+  }
+  const request = readJson(resolveInside(specsRoot, options.request, '--request'), 'lease request')
+  const suppliedProjection = readJson(resolveInside(specsRoot, options.projection, '--projection'), 'context projection')
+  return issueLeaseFromTrustedInputs({
+    specsRoot,
+    graph: options.graph,
+    task: options.task,
+    state: options.state,
+    policy: options.policy,
+    privateKey: options.privateKey,
+    request,
+    suppliedProjection,
+    now,
+  })
 }
 
 async function main() {
