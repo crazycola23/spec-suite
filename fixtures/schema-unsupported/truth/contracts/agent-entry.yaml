@@ -1,0 +1,10 @@
+# 冻结语料，不要改。见 fixtures/README.md。
+# 这份自己是合法的 schemaVersion 1 —— 本语料只让「字典」是 99，
+# 这样断言才能指名道姓地落在字典上，而不是撞上第一个不合法的文件就停。
+schemaVersion: 1
+suite: schema-unsupported
+common:
+  markdown: |
+    ## 本语料的用途
+
+    证明工具遇到未来未知 schema 时拒绝执行，且不猜测其含义。

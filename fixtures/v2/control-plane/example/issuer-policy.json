@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "policyEpoch": 7,
+  "issuer": "spec-suite-v2-slice",
+  "keyId": "spec-suite-v2-slice-ed25519",
+  "maxTtlSeconds": 30,
+  "leaseTtlSeconds": 15,
+  "source": "CP-LEASE-001",
+  "baseline": [
+    {
+      "kind": "file.write",
+      "resourcePrefix": "out/baseline/",
+      "source": "CP-BASELINE-001"
+    }
+  ],
+  "protectedFilePrefixes": [
+    {
+      "prefix": "out/protected/",
+      "permission": "permission:customer-write",
+      "constraint": "PROTECTED_CUSTOMER_WRITE",
+      "source": "CP-PERM-001"
+    }
+  ],
+  "taskScopes": [
+    {
+      "taskId": "task:customer-update",
+      "subjects": [
+        "agent:harness"
+      ],
+      "requiredRoots": [
+        "action:customer-update"
+      ],
+      "requiredSurfaces": [
+        "file.write:out/protected/customer.json",
+        "network.mock.protected:stripe.customer.update",
+        "network.mock.live-stripe:stripe.customer.update"
+      ],
+      "requiredConstraints": [
+        "gap:G-17"
+      ],
+      "allowedEffects": [
+        {
+          "kind": "file.write",
+          "resource": "out/protected/customer.json",
+          "permission": "permission:customer-write",
+          "source": "CP-PERM-001"
+        },
+        {
+          "kind": "network.mock.protected",
+          "resource": "mock://protected.local/stripe/customers/cus_demo",
+          "permission": "permission:customer-write",
+          "source": "CP-PERM-001"
+        },
+        {
+          "kind": "network.mock.live-stripe",
+          "resource": "mock://live-stripe.local/stripe/customers/cus_demo",
+          "permission": "permission:customer-write",
+          "source": "CP-PERM-001"
+        }
+      ]
+    }
+  ]
+}

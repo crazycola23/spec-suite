@@ -1,0 +1,19 @@
+# 冻结语料，不要改。见 fixtures/README.md。
+#
+# meta.schemaVersion 是 99，字面写死。
+# 不由测试运行时改写 —— 改写逻辑一旦失效（改错字段、改了副本、根本没落盘），
+# 测试会因为「没触发错误」而变绿。写死在文件里，这条退路就没有了。
+meta:
+  suite: schema-unsupported
+  truthSource: contracts/dictionary.yaml
+  schemaVersion: 99
+
+gaps:
+  - code: G-01
+    missing: 这条记录本身写得没问题
+    source: contracts/dictionary.yaml
+    blocks: []
+    protectiveDefault: 拒绝
+    rollbackCost: low
+    owner: 平台组
+    status: open

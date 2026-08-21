@@ -1,0 +1,13 @@
+{
+  "_comment": "冻结语料，不要改。见 fixtures/README.md。本身合法（schemaVersion 1）。",
+  "schemaVersion": 1,
+  "policyEpoch": 1,
+  "issuer": "schema-unsupported",
+  "keyId": "schema-unsupported-ed25519",
+  "maxTtlSeconds": 30,
+  "leaseTtlSeconds": 15,
+  "source": "CP-LEASE-001",
+  "baseline": [],
+  "protectedFilePrefixes": [],
+  "taskScopes": []
+}

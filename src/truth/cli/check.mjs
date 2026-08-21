@@ -8,6 +8,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { toPosix } from '../../shared/text.mjs'
+import { schemaVersionHint } from '../../shared/schema-version.mjs'
 import { renderReportMd } from '../diagnostics/report.mjs'
 import { run } from '../pipeline.mjs'
 
@@ -49,7 +50,11 @@ export async function main({ argv, fallbackConfigDir }) {
       r = await run({ ...opts, write: false })
     }
   } catch (e) {
-    process.stderr.write(`检查器无法运行：${e.message}\n`)
+    // 第一行逐字保留 `${e.message}`：v1-vertical-slice.test.mjs 按正则断言它。
+    // 补充说明单独一行，与 guard / migrate / verify-consumer 三个脚本一致 ——
+    // 版本类错误的历史文案是「必须是 schemaVersion 1」，字面上把人指向
+    // 「降级文档」，而正确处置恰好相反。措辞属于 CLI 层，判定不动。
+    process.stderr.write(`检查器无法运行：${e.message}\n${schemaVersionHint(e)}`)
     return 2
   }
 

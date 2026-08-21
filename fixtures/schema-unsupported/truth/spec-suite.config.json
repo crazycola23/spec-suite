@@ -1,0 +1,16 @@
+{
+  "_comment": "冻结语料，不要改。见 fixtures/README.md。版本合法的 config：用它跑，checker 会走到字典，而字典的 meta.schemaVersion 是 99 —— 断言「未来未知版本被拒绝」。",
+  "schemaVersion": 1,
+  "dictionaries": ["contracts/dictionary.yaml"],
+  "generatedDir": "generated",
+  "claudeMd": "CLAUDE.md",
+  "agentEntry": { "source": "contracts/agent-entry.yaml", "adapters": [] },
+  "idNamespaces": [],
+  "projections": {},
+  "structuredFileGlobs": ["**/*.yaml", "**/*.yml", "**/*.json"],
+  "markdownGlobs": ["**/*.md"],
+  "ddlGlobs": [],
+  "excludeFromScan": ["node_modules/**", ".git/**", "generated/**"],
+  "labelCopyAllowlist": [],
+  "coverageRequirements": []
+}

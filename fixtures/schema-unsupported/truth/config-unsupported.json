@@ -1,0 +1,16 @@
+{
+  "_comment": "冻结语料，不要改。见 fixtures/README.md。这份 config 自己的 schemaVersion 是 99：checker 连字典都不该读，直接 exit 2（无法运行），而不是「先跑完再报告」。",
+  "schemaVersion": 99,
+  "dictionaries": ["contracts/dictionary.yaml"],
+  "generatedDir": "generated",
+  "claudeMd": "CLAUDE.md",
+  "agentEntry": { "source": "contracts/agent-entry.yaml", "adapters": [] },
+  "idNamespaces": [],
+  "projections": {},
+  "structuredFileGlobs": ["**/*.yaml", "**/*.yml", "**/*.json"],
+  "markdownGlobs": ["**/*.md"],
+  "ddlGlobs": [],
+  "excludeFromScan": ["node_modules/**", ".git/**", "generated/**"],
+  "labelCopyAllowlist": [],
+  "coverageRequirements": []
+}
