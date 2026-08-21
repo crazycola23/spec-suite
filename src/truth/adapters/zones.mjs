@@ -36,12 +36,19 @@ export function findZones(lines, { file, col } = {}) {
   return zones
 }
 
-export function checkZones({ specsRoot, config, model, col, write = false }) {
+/**
+ * 计算两区制比对结果，并在 write 模式下一并算出重写计划。
+ *
+ * 只读不写。唯一的写入点是 applyZonePlan()，这样"校验"与"落盘"
+ * 各自可以单独测：校验可以在只读语料上跑，落盘可以拿合成计划跑。
+ */
+export function planZones({ specsRoot, config, model, col, write = false }) {
   const all = walkFiles(specsRoot).filter(
     (r) => matchesAny(r, config.markdownGlobs) && !matchesAny(r, config.excludeFromScan))
 
   const seen = new Set()
   const ratios = []
+  const plan = []
   let zoneCount = 0
   let mismatched = 0
   let rewritten = 0
@@ -59,6 +66,7 @@ export function checkZones({ specsRoot, config, model, col, write = false }) {
     let next = lines.slice()
     let shift = 0
     let zoneLines = 0
+    let fileRewrites = 0
 
     for (const z of zones) {
       seen.add(z.id)
@@ -88,12 +96,16 @@ export function checkZones({ specsRoot, config, model, col, write = false }) {
           next.splice(z.begin + 1 + shift, z.body.length, ...want)
           shift += want.length - z.body.length
           rewritten++
+          fileRewrites++
         }
       }
     }
     ratios.push({ file: rel, total: lines.length, zoneLines, ratio: +(zoneLines / Math.max(lines.length, 1)).toFixed(3) })
-    if (write && rewritten > 0 && next.join('\n') !== lines.join('\n')) {
-      fs.writeFileSync(abs, next.join('\n'), 'utf8')
+    // fileRewrites 是 per-file 的。原来这里用的是函数级的 rewritten，
+    // 语义上等于"到目前为止任何文件改过吗"，只靠后面的逐行比较才没写错文件；
+    // 一旦有人删掉那个比较，第一个改过的文件之后所有文件都会被无故重写。
+    if (write && fileRewrites > 0 && next.join('\n') !== lines.join('\n')) {
+      plan.push({ file: rel, abs, nextLines: next })
     }
   }
 
@@ -118,5 +130,28 @@ export function checkZones({ specsRoot, config, model, col, write = false }) {
   col.stat(4, '不一致', mismatched)
   col.stat(4, 'yaml 有 / md 无', uncovered.length)
   if (write) col.stat(4, '已重写', rewritten)
-  return { zoneCount, mismatched, uncovered, ratios, rewritten }
+  return { zoneCount, mismatched, uncovered, ratios, rewritten, plan }
+}
+
+/**
+ * 执行重写计划。唯一的写入点。
+ *
+ * 注意 nextLines 是 readText + split(/\r?\n/) 的产物，join('\n') 会把
+ * CRLF 归一成 LF —— 这是既有行为，determinism 测试依赖它，不要"修"。
+ */
+export function applyZonePlan(plan) {
+  for (const entry of plan) {
+    fs.writeFileSync(entry.abs, entry.nextLines.join('\n'), 'utf8')
+  }
+  return plan.length
+}
+
+/**
+ * 签名兼容的 wrapper：先算计划，再落盘。既有调用方与测试无需改动。
+ * 返回形状与拆分前逐字段一致（不含 plan —— 想要计划的调用方直接用 planZones）。
+ */
+export function checkZones({ specsRoot, config, model, col, write = false }) {
+  const { plan, ...result } = planZones({ specsRoot, config, model, col, write })
+  if (write) applyZonePlan(plan)
+  return result
 }

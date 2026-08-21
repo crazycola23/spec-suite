@@ -45,8 +45,9 @@ export async function run(opts) {
   checkCoverageMatrix({ specsRoot, config, idRefResult, col })
 
   const errors = col.findings.filter((f) => f.severity === 'error').length
+  // 刻意不带时间戳：report 要能进 golden 语料，逐字节可复现。
+  // 与 SCHEMA.md §5「V1 manifest 不放时间戳」同一条理由。
   const report = {
-    generatedAt: new Date().toISOString(),
     specsRoot: toPosix(specsRoot),
     configPath: toPosix(config.configPath),
     isFallbackConfig: config.isFallback,
