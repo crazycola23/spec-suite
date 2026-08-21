@@ -2,6 +2,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { checkSchemaVersion } from '../../shared/schema-version.mjs'
 import { readText } from '../../shared/text.mjs'
 
 /**
@@ -26,6 +27,12 @@ export function buildModel({ specsRoot, config, YAML, col }) {
     }
     files[rel] = { doc, text }
     if (!doc || typeof doc !== 'object') continue
+    // 字典的版本判定。不读这一行，`meta.schemaVersion: 99` 就会被当成 v1
+    // 静默读下去 —— 那正是仓库禁止的「遇到未来未知 schema 就猜」。
+    // 缺版本目前只是 warn（策略里 requiredNow=false，处于迁移期），
+    // 声明了高于本工具的版本则是 error。
+    const version = checkSchemaVersion('dictionary', doc)
+    if (version.severity !== 'ok') col?.add(1, version.severity, version.message, { file: rel })
     for (const [key, value] of Object.entries(doc)) {
       if (key === 'meta') continue
       const list = Array.isArray(value) ? value : null

@@ -28,6 +28,11 @@ export async function run(opts) {
       `本库没有 spec-suite.config.json，用的是 skill 自带示例（\`${toPosix(config.configPath)}\`）。` +
       `命名空间正则与路径未必匹配本库 —— 报告里的计数按示例 config 解读`)
   }
+  // config 的版本判定在 loadConfig 里做（error 已经 throw 了）。剩下的 warn
+  // 在这里收进 findings —— loadConfig 被四个兄弟脚本复用，那里没有 collector。
+  if (config.schemaVerdict?.severity === 'warn') {
+    col.add(1, 'warn', config.schemaVerdict.message, { file: toPosix(config.configPath) })
+  }
 
   const YAML = await loadYamlLib(specsRoot)
   const model = buildModel({ specsRoot, config, YAML, col })
