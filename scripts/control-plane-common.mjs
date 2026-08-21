@@ -2,6 +2,8 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { assertSchemaVersion as assertSchemaVersionPolicy } from '../src/shared/schema-version.mjs'
+
 export function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize)
   if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return value
@@ -93,8 +95,11 @@ export function sameStrings(left, right) {
   return a.length === b.length && a.every((item, index) => item === b[index])
 }
 
+// 保留这个签名：control plane 的四个调用方按 (document, label) 调用它。
+// 判定本身已经上移到中立层的策略表 —— V1 与 V2 现在共用同一个判定点，
+// 但各自保留原有的错误语义（V1 收进 collector，V2 抛异常）。
 export function assertSchemaVersion(document, label) {
-  if (document.schemaVersion !== 1) throw new Error(`${label}.schemaVersion must be 1`)
+  assertSchemaVersionPolicy('control-plane-document', document, { label })
 }
 
 export function canonicalEffectReference(effect, label = 'effect') {

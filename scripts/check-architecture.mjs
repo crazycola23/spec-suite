@@ -19,7 +19,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const ROOTS = ['src', 'scripts']
+// migrations/ 也在扫描范围内：它 import src/shared/ 的策略表，反向依赖
+// （shared → migrations）会让 shared 不再是叶子层，必须被机器挡住。
+const ROOTS = ['src', 'scripts', 'migrations']
 
 /**
  * 把注释替换成等长空白，字符串 / 模板字面量原样保留。

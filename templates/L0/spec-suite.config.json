@@ -1,5 +1,6 @@
 {
   "_comment": "L0 template. Replace project paths and namespace patterns before enabling CI.",
+  "schemaVersion": 1,
   "dictionaries": ["contracts/dictionary.yaml"],
   "generatedDir": "generated",
   "claudeMd": "CLAUDE.md",

@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { assertSchemaVersion, schemaVersionHint } from '../src/shared/schema-version.mjs'
 import { loadConfig, readText, toPosix } from './check-spec-suite.mjs'
 
 function parseArgs(argv) {
@@ -81,7 +82,9 @@ export function verifyConsumerContracts(options = {}) {
   } catch (error) {
     throw new Error(`规格库 generated manifest 无法解析：${error.message}`)
   }
-  if (manifest?.schemaVersion !== 1 || !Array.isArray(manifest.outputs)) {
+  // 同上：版本走统一策略表，形状单独判，文案与旧版逐字相同。
+  assertSchemaVersion('generated-manifest', manifest)
+  if (!Array.isArray(manifest?.outputs)) {
     throw new Error('generated manifest 必须是 schemaVersion 1 且包含 outputs 数组')
   }
   const outputs = [...new Set(manifest.outputs)].sort()
@@ -117,7 +120,7 @@ function main() {
     process.stdout.write(`consumer contracts verified (${result.files.length} files)\n`)
     return 0
   } catch (error) {
-    process.stderr.write(`消费副本验证失败：${error.message}\n`)
+    process.stderr.write(`消费副本验证失败：${error.message}\n${schemaVersionHint(error)}`)
     return 1
   }
 }

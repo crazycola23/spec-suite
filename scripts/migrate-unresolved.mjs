@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { assertSchemaVersion, schemaVersionHint } from '../src/shared/schema-version.mjs'
 import { loadYamlLib, readText } from './check-spec-suite.mjs'
 
 function parseArgs(argv) {
@@ -85,6 +86,12 @@ export async function migrateUnresolved(options) {
 
   const unresolvedData = unresolvedDoc.toJS() ?? {}
   const dictionaryData = dictionaryDoc.toJS() ?? {}
+
+  // 版本校验必须在**任何**写盘之前，且早于下面的 existing 分支——那条分支也会写。
+  // 迁移一份版本未知的 registry 等于猜它的含义，然后把猜测盖章进派生 gap 的
+  // provenance 里。宁可拒绝迁移。
+  const unresolvedVersion = assertSchemaVersion('unresolved-registry', unresolvedData).version
+
   const facts = Array.isArray(unresolvedData.facts) ? unresolvedData.facts : []
   const gaps = Array.isArray(dictionaryData.gaps) ? dictionaryData.gaps : []
   const existing = gaps.find((gap) => gap?.provenance?.unresolvedFact === options.fact)
@@ -113,7 +120,8 @@ export async function migrateUnresolved(options) {
     closedBy: null,
     closedAt: null,
     provenance: {
-      schemaVersion: unresolvedData.schemaVersion ?? 1,
+      // 校验过的真实版本，不是 `?? 1` 猜出来的。缺版本的 registry 上面已经拒绝了。
+      schemaVersion: unresolvedVersion,
       unresolvedFact: source.fact,
       sourceSearch: Array.isArray(source.sourceSearch) ? source.sourceSearch : [],
       evidence: Array.isArray(source.evidence) ? source.evidence : [],
@@ -139,7 +147,7 @@ async function main() {
     process.stdout.write(`${result.code}${result.migrated ? ' migrated' : ' already-migrated'}\n`)
     return 0
   } catch (error) {
-    process.stderr.write(`迁移失败：${error.message}\n`)
+    process.stderr.write(`迁移失败：${error.message}\n${schemaVersionHint(error)}`)
     return 1
   }
 }

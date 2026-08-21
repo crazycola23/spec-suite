@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { assertSchemaVersion, schemaVersionHint } from '../src/shared/schema-version.mjs'
 import { loadYamlLib, readText } from './check-spec-suite.mjs'
 
 function parseArgs(argv) {
@@ -56,7 +57,10 @@ export async function inspectUnresolvedFact(options = {}) {
   } catch (error) {
     throw new Error(`unresolved registry 无法解析：${error.message}`)
   }
-  if (doc?.schemaVersion !== 1 || !Array.isArray(doc.facts)) {
+  // 版本与形状分两步判，但文案与旧版逐字相同（任一条不满足都是同一句）。
+  // 版本走统一策略表；未来未知版本会被明确拒绝，而不是当成 1。
+  assertSchemaVersion('unresolved-registry', doc)
+  if (!Array.isArray(doc?.facts)) {
     throw new Error('unresolved registry 必须是 schemaVersion 1 且包含 facts 数组')
   }
   const matches = doc.facts.filter((item) => item?.fact === options.fact)
@@ -82,7 +86,7 @@ async function main() {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
     return result.status === 'unresolved' ? 3 : 0
   } catch (error) {
-    process.stderr.write(`unresolved guard 失败：${error.message}\n`)
+    process.stderr.write(`unresolved guard 失败：${error.message}\n${schemaVersionHint(error)}`)
     return 1
   }
 }

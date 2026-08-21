@@ -1,5 +1,6 @@
 // 检查 1a：记录级 schema 符合性。
 
+import { checkSchemaVersion } from '../../shared/schema-version.mjs'
 import { PLACEHOLDER_RE } from '../../shared/text.mjs'
 
 /** 每种记录类型的必填键。children 指定嵌套集合的类型名。 */
@@ -89,9 +90,11 @@ export function checkSchema({ model, col }) {
   col.stat(1, 'source 缺失或为空', missingSource)
   col.stat(1, '残留占位符', placeholders)
   if (model.agentEntry !== null) {
-    if (model.agentEntry?.schemaVersion !== 1) {
-      col.add(1, 'error', 'Agent Entry Contract 的 `schemaVersion` 必须是 1')
-    }
+    // 版本判定走统一策略表（src/shared/schema-version.mjs），不再本地写 `!== 1`。
+    // 文案由 SCHEMA_POLICY 的 legacyMessage 逐字保留，severity 由策略给出 ——
+    // 将来把某个版本标成 deprecated，这里会自动变 warn 而不必改代码。
+    const version = checkSchemaVersion('agent-entry', model.agentEntry)
+    if (version.severity !== 'ok') col.add(1, version.severity, version.message)
     if (typeof model.agentEntry?.common?.markdown !== 'string' || model.agentEntry.common.markdown.trim() === '') {
       col.add(1, 'error', 'Agent Entry Contract 缺少非空的 `common.markdown`')
     }
