@@ -2,11 +2,19 @@
 /**
  * check-architecture.mjs —— 静态架构约束检查
  *
- * 目前强制：import 图无环。
+ * 强制三件事：
+ *   1. import 图无环
+ *   2. 每条跨模块边都符合 src/layers.mjs 的 allowed-edge 声明
+ *   3. 每个 .mjs 都归属于某一层（未归类 = 违规，不是默认放行）
  *
  * 为什么要有这个脚本：拆分后模块变多，环依赖是最容易悄悄引入、
  * 又最难在运行时发现的退化（ESM 允许环，只是把绑定变成 undefined）。
- * 一旦成环，"纯函数 + 分层"的结构就名存实亡。
+ * 一旦成环，"纯函数 + 分层"的结构就名存实亡。层边界同理 —— 用户要求的
+ * 「Control Plane → Truth Integrity」这个方向，只有机器每次都查才守得住。
+ *
+ * 第 3 条是有意的 fail-closed：新增一个文件而忘了归类，检查报错而不是
+ * 静默把它当作"随便可以 import 任何层"。这与仓库的 unknown-stays-unknown
+ * 同源 —— 未知归属不能自动变成宽松默认。
  *
  * 扫描器要求逐字正确，不能靠行匹配：scripts/ 下已有 6 处跨行
  * `import {` 语句，按行扫会漏掉真实边。因此先按字符扫掉注释
@@ -18,6 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { LAYERS, edgeAllowed, layerOf } from '../src/layers.mjs'
 
 // migrations/ 也在扫描范围内：它 import src/shared/ 的策略表，反向依赖
 // （shared → migrations）会让 shared 不再是叶子层，必须被机器挡住。
@@ -154,14 +163,70 @@ export function findCycles(graph) {
   return cycles
 }
 
-/** 汇总检查。返回 { violations, fileCount, edgeCount }，不退出、不打印。 */
+/**
+ * 检查分层。graph 的键与边都是仓库相对 POSIX 路径。
+ *
+ * 三类违规：
+ *   - 源文件未归类（fail closed）
+ *   - 边的目标未归类：说明相对 import 逃出了被归类的目录树
+ *   - 层与层之间的方向不被 LAYERS 允许
+ *
+ * @returns {{violations: string[], layerCounts: Record<string, number>, crossEdges: Array<{from: string, to: string, fromLayer: string, toLayer: string}>}}
+ */
+export function checkLayers(graph) {
+  const violations = []
+  const layerCounts = {}
+  for (const name of Object.keys(LAYERS)) layerCounts[name] = 0
+
+  const layers = new Map()
+  for (const file of [...graph.keys()].sort()) {
+    const layer = layerOf(file)
+    if (layer === null) {
+      violations.push(
+        `${file} 没有归属层 —— 请在 src/layers.mjs 的 FILE_LAYERS 里显式归类。`
+        + `未归类不等于"可以随便 import"，所以这里报错而不是放行。`,
+      )
+      continue
+    }
+    layers.set(file, layer)
+    layerCounts[layer] += 1
+  }
+
+  const crossEdges = []
+  for (const from of [...graph.keys()].sort()) {
+    const fromLayer = layers.get(from)
+    if (fromLayer === undefined) continue // 已作为"未归类"报过，不重复刷屏
+    for (const to of graph.get(from) ?? []) {
+      const toLayer = layers.get(to) ?? layerOf(to)
+      if (toLayer === null || toLayer === undefined) {
+        violations.push(`${from} import 了未归类的 ${to} —— 相对 import 逃出了被归类的目录树`)
+        continue
+      }
+      if (fromLayer !== toLayer) crossEdges.push({ from, to, fromLayer, toLayer })
+      const verdict = edgeAllowed(fromLayer, toLayer)
+      if (!verdict.allowed) violations.push(`违规边：${from}（${fromLayer}）→ ${to}（${toLayer}）：${verdict.reason}`)
+    }
+  }
+  return { violations, layerCounts, crossEdges }
+}
+
+/** 汇总检查。返回 { violations, fileCount, edgeCount, graph, layerCounts, crossEdges }，不退出、不打印。 */
 export function checkArchitecture(repoRoot, roots = ROOTS) {
   const { graph, problems } = buildImportGraph(repoRoot, roots)
   const violations = [...problems]
   for (const cyc of findCycles(graph)) violations.push(`import 环：${cyc.join(' → ')}`)
+  const layers = checkLayers(graph)
+  violations.push(...layers.violations)
   let edgeCount = 0
   for (const edges of graph.values()) edgeCount += edges.length
-  return { violations, fileCount: graph.size, edgeCount, graph }
+  return {
+    violations,
+    fileCount: graph.size,
+    edgeCount,
+    graph,
+    layerCounts: layers.layerCounts,
+    crossEdges: layers.crossEdges,
+  }
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : ''
@@ -169,6 +234,8 @@ if (import.meta.url === invokedPath) {
   const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..')
   const r = checkArchitecture(repoRoot)
   for (const v of r.violations) process.stderr.write(`✖ ${v}\n`)
-  process.stdout.write(`扫描 ${r.fileCount} 个 .mjs / ${r.edgeCount} 条内部边；违规 ${r.violations.length}\n`)
+  const byLayer = Object.entries(r.layerCounts).map(([k, n]) => `${k} ${n}`).join(' / ')
+  process.stdout.write(`扫描 ${r.fileCount} 个 .mjs / ${r.edgeCount} 条内部边 / ${r.crossEdges.length} 条跨层边；违规 ${r.violations.length}\n`)
+  process.stdout.write(`分层：${byLayer}\n`)
   process.exit(r.violations.length > 0 ? 1 : 0)
 }
