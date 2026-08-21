@@ -293,17 +293,19 @@ node scripts/check-spec-suite.mjs --specs-root . --config spec-suite.config.json
 node scripts/generate-contract-bundle.mjs --specs-root . --config spec-suite.config.json
 ```
 
-checker 七类检查：
+checker 七类检查（下表由 `registry/invariants.mjs` 生成，`node scripts/render-docs.mjs --write`）：
 
+<!-- BEGIN GENERATED: registry.checks -->
 | # | 检查 | error 的含义 |
 |---|---|---|
-| 1 | schema | 记录形状、必填 source、占位符或 Agent Entry Contract 无效 |
-| 2 | 状态机 | 出边悬空，或 terminal 与 transitions 矛盾 |
-| 3 | ID 引用 | source/引用没有定义，或命名空间有歧义 |
-| 4 | generated regions | canonical 与 Markdown 投影不一致 |
-| 5 | `N-xx` 覆盖 | 禁令没有可信三态断言行 |
-| 6 | label copy | 结构化字段完整复制 canonical label |
-| 7 | 覆盖矩阵 | 配置要求的 ID 没出现在指定文件 |
+| 1 | schema 符合性 | 记录形状、必填 source、占位符或 Agent Entry Contract 无效 |
+| 2 | 状态机闭合 | 出边悬空，或 terminal 与 transitions 矛盾 |
+| 3 | ID 引用完整性 | source/引用没有定义，或命名空间有歧义 |
+| 4 | 两区制比对 | canonical 与 Markdown 投影不一致 |
+| 5 | N-xx 禁令覆盖 | 禁令没有可信三态断言行 |
+| 6 | 禁止复制中文标签 | 结构化字段完整复制 canonical label |
+| 7 | 覆盖矩阵完整性 | 配置要求的 ID 没出现在指定文件 |
+<!-- END GENERATED: registry.checks -->
 
 审计既有仓库时，先写匹配该仓库命名空间与路径的 config，再只读运行：
 

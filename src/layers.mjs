@@ -16,12 +16,13 @@
  * 每层允许**指向**的层。列表里含自身 = 允许同层互相 import。
  *
  * 层序（由弱到强的依赖能力）：
- *   policy ─┐
- *   shared ─┼─→ truth ─→ truth-cli ─→ facade ─┐
- *           │      └───→ control ─────────────┼─→ cli
- *   migrations ──────────────────────────────-┘
+ *   policy ────┐（叶子）
+ *   registry ──┤（叶子）
+ *   shared ────┼─→ truth ─→ truth-cli ─→ facade ─┐
+ *              │      └───→ control ─────────────┼─→ cli
+ *   migrations ┘                                 ┘
  *
- * 四条不对称是有意的：
+ * 五条不对称是有意的：
  *
  * 1. `truth` **不能**指向 `control`。这是用户约束的核心：Truth Integrity
  *    不允许依赖 Lease / issuer / effect-policy 这些 V2 概念。反方向
@@ -45,17 +46,23 @@
  * 4. `cli` **不能**指向 `truth-cli`：只有 facade 能。将来若有新入口需要
  *    `main()`，正确做法是让 facade 显式导出它（D1 的名单从 30 变 31，
  *    是一次可见的决定），而不是绕过门面各自接线。
+ *
+ * 5. `registry` 是叶子，且 `truth` 可以读它 —— 方向是 truth → registry，
+ *    绝不反向。registry 里只有声明数据（invariant 清单、七类检查的名字），
+ *    checker 从它派生报告小节；若 registry 反过来 import checker 去"自动
+ *    发现"检查，就会成环，而且 registry 也不再是可独立阅读的真相源。
  */
 export const LAYERS = {
   policy: { allow: [], role: '分层策略自身。叶子，不 import 任何模块' },
+  registry: { allow: [], role: 'invariant/check registry：纯声明数据与纯查询函数。叶子' },
   shared: { allow: ['shared'], role: '与产品层无关的工具：文本、glob、遍历、版本策略' },
   migrations: { allow: ['shared'], role: 'schema 迁移注册表与实现' },
-  truth: { allow: ['truth', 'shared'], role: 'V1 Truth Integrity：字典、模型、检查规则、投影、两区制' },
+  truth: { allow: ['truth', 'shared', 'registry'], role: 'V1 Truth Integrity：字典、模型、检查规则、投影、两区制' },
   'truth-cli': { allow: ['truth', 'shared'], role: 'V1 的 argv 解析与输出渲染。是库：返回 exit code，不 process.exit' },
   control: { allow: ['control', 'truth', 'shared'], role: 'V2 Control Plane：lease、effect、context projection、IPC、trust' },
   facade: { allow: ['truth-cli', 'truth', 'shared'], role: '唯一的库门面 scripts/check-spec-suite.mjs（D1：30 个导出名已冻结）' },
-  cli: { allow: ['facade', 'control', 'truth', 'shared', 'migrations', 'policy'], role: '入口脚本：持有 exit code，互相之间不得 import' },
-  test: { allow: ['test', 'cli', 'facade', 'control', 'truth-cli', 'truth', 'shared', 'migrations', 'policy'], role: '测试。可以看任何层' },
+  cli: { allow: ['facade', 'control', 'truth', 'shared', 'migrations', 'policy', 'registry'], role: '入口脚本：持有 exit code，互相之间不得 import' },
+  test: { allow: ['test', 'cli', 'facade', 'control', 'truth-cli', 'truth', 'shared', 'migrations', 'policy', 'registry'], role: '测试。可以看任何层' },
 }
 
 /**
@@ -70,6 +77,7 @@ export const LAYERS = {
  */
 export const FILE_LAYERS = [
   { match: 'src/layers.mjs', layer: 'policy' },
+  { match: 'registry/', layer: 'registry' },
   { match: 'src/shared/', layer: 'shared' },
   // src/truth/cli/ 必须单独归类，且**不是** cli 层：它是库（返回 exit code，
   // 不 process.exit），只被 facade 消费。最长前缀优先保证它不会被
@@ -98,6 +106,7 @@ export const FILE_LAYERS = [
   { match: 'scripts/migrate-unresolved.mjs', layer: 'cli' },
   { match: 'scripts/verify-consumer-contracts.mjs', layer: 'cli' },
   { match: 'scripts/check-architecture.mjs', layer: 'cli' },
+  { match: 'scripts/render-docs.mjs', layer: 'cli' },
 ]
 
 /** 测试文件按后缀归类，与目录无关。 */

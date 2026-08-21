@@ -83,4 +83,4 @@ node scripts/effect-enforcer-daemon.mjs --config /isolated/enforcer-daemon.json
 
 两个进程都从 stdin 逐行读取上面的 JSON request，并在 stdout 逐行返回 JSON response；ready/status 写到 stderr。`npm test` 会临时构造完整隔离目录并攻击 trust-path 注入、workspace policy self-authorization、篡改、cross-task replay、expiry、old epoch、revocation、canonical/graph drift、G-17 bypass、baseline/protected overlap、symlink escape、classifier ambiguity、issuer/revocation/audit failure，以及 denial provenance 完整性。
 
-仍然没有 `init/adopt` CLI、Ajv、真实 Stripe、eBPF、容器 framework、checker 拆分或 trusted/monotonic clock。
+仍然没有 `init/adopt` CLI、Ajv、真实 Stripe、eBPF、容器 framework 或 trusted/monotonic clock。

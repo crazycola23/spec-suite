@@ -1,16 +1,14 @@
 // 报告渲染。纯函数：findings + stats → markdown。
 
 import { toPosix } from '../../shared/text.mjs'
+import { checkIds, checkNames } from '../../../registry/invariants.mjs'
 
-const CHECK_NAMES = {
-  1: 'schema 符合性',
-  2: '状态机闭合',
-  3: 'ID 引用完整性',
-  4: '两区制比对',
-  5: 'N-xx 禁令覆盖',
-  6: '禁止复制中文标签',
-  7: '覆盖矩阵完整性',
-}
+// 小节标题与顺序都从 registry 派生，不在这里再维护一份。
+// 原先这两处是本文件里的字面量（一张 CHECK_NAMES 表 + 一个写死的
+// [1..7] 循环），与 SCHEMA.md §7 的表格是两份手抄 —— 加第 8 类检查时
+// 极易只改一处，报告就会静默漏掉一整节。
+const CHECK_NAMES = checkNames()
+const CHECK_IDS = checkIds()
 const SEV_ORDER = { error: 0, warn: 1, info: 2 }
 const SEV_LABEL = { error: '缺陷', warn: '警告', info: '信息' }
 
@@ -25,7 +23,7 @@ export function renderReportMd({ specsRoot, configPath, isFallback, findings, st
   L.push('> **审计结论不等于修改授权。** 报告只列出发现，改不改由库的所有者决定。')
   L.push('')
 
-  for (const id of [1, 2, 3, 4, 5, 6, 7]) {
+  for (const id of CHECK_IDS) {
     L.push(`## 检查 ${id} · ${CHECK_NAMES[id]}`, '')
     const st = stats[id]
     if (st && Object.keys(st).length) {

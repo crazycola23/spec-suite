@@ -28,9 +28,10 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { LAYERS, edgeAllowed, layerOf } from '../src/layers.mjs'
 
-// migrations/ 也在扫描范围内：它 import src/shared/ 的策略表，反向依赖
-// （shared → migrations）会让 shared 不再是叶子层，必须被机器挡住。
-const ROOTS = ['src', 'scripts', 'migrations']
+// migrations/ 与 registry/ 也在扫描范围内：两者都是被 src/ 反向依赖的叶子
+// （truth → registry），漏扫就等于放开了它们的方向约束 —— 例如
+// shared → migrations 会让 shared 不再是叶子层，registry → truth 会成环。
+const ROOTS = ['src', 'scripts', 'migrations', 'registry']
 
 /**
  * 把注释替换成等长空白，字符串 / 模板字面量原样保留。
