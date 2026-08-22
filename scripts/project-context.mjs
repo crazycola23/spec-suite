@@ -24,8 +24,8 @@ import {
   stableJson,
   stringSet,
   toPosix,
-  writeJsonAtomic,
 } from './control-plane-common.mjs'
+import { writeFileAtomic } from '../src/shared/atomic-write.mjs'
 
 const NODE_KINDS = new Set(['kernel', 'file', 'fact', 'gap', 'contract', 'action', 'provider', 'permission'])
 
@@ -281,7 +281,12 @@ async function main() {
     const projection = projectContext(options)
     if (options.output) {
       const root = path.resolve(options.specsRoot ?? '.')
-      writeJsonAtomic(resolveInside(root, options.output, '--output'), projection)
+      // 与下面 stdout 分支逐字相同的序列化 —— 落盘与打印的字节必然一致。
+      writeFileAtomic(
+        resolveInside(root, options.output, '--output'),
+        `${stableJson(projection, 2)}\n`,
+        { mode: 0o600 },
+      )
     } else {
       process.stdout.write(`${stableJson(projection, 2)}\n`)
     }

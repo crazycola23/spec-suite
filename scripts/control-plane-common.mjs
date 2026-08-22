@@ -64,19 +64,6 @@ export function toPosix(value) {
   return value.split(path.sep).join('/')
 }
 
-export function writeJsonAtomic(target, value) {
-  const bytes = `${stableJson(value, 2)}\n`
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  const temporary = `${target}.tmp-${process.pid}-${crypto.randomUUID()}`
-  try {
-    fs.writeFileSync(temporary, bytes, { encoding: 'utf8', mode: 0o600 })
-    fs.renameSync(temporary, target)
-  } finally {
-    if (fs.existsSync(temporary)) fs.rmSync(temporary)
-  }
-  return bytes
-}
-
 export function stringSet(value, label, { allowEmpty = true } = {}) {
   if (!Array.isArray(value)) throw new Error(`${label} must be an array`)
   const strings = value.map((item) => {

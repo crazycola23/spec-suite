@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { writeFilesAtomic } from '../src/shared/atomic-write.mjs'
 import { extractIdTokens, loadYamlLib, readText, run, toPosix } from './check-spec-suite.mjs'
 
 function parseArgs(argv) {
@@ -117,27 +118,11 @@ function validateSources({ contracts, config, defs, generatedRoot, specsRoot }) 
 }
 
 function writeAllAfterValidation(files) {
-  const snapshots = files.map(({ target, content }) => ({
-    target,
-    content,
-    existed: fs.existsSync(target),
-    previous: fs.existsSync(target) ? fs.readFileSync(target) : null,
-  }))
-  const written = []
-  try {
-    for (const file of snapshots) {
-      fs.mkdirSync(path.dirname(file.target), { recursive: true })
-      if (file.existed && fs.readFileSync(file.target, 'utf8') === file.content) continue
-      fs.writeFileSync(file.target, file.content, 'utf8')
-      written.push(file)
-    }
-  } catch (error) {
-    for (const file of written.reverse()) {
-      if (file.existed) fs.writeFileSync(file.target, file.previous)
-      else if (fs.existsSync(file.target)) fs.rmSync(file.target)
-    }
-    throw error
-  }
+  // 语义不变：全有或全无，且内容相同的文件不重写。
+  // 变化的是**强度** —— 原实现直写目标，第二个文件写失败时第一个已经落在
+  // 目标位置，靠内存快照还原；现在所有 temp 写完才开始 rename，所以那类失败
+  // 发生时目标一个都没被动过，根本用不到回滚。回滚只剩 rename 阶段兜底。
+  writeFilesAtomic(files, { skipUnchanged: true })
 }
 
 export async function generateContractBundle(options = {}) {

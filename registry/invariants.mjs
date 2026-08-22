@@ -223,9 +223,13 @@ export const INVARIANTS = [
     schemaVersions: [1],
     enforcement: ENFORCEMENT.MACHINE,
     checks: [1],
-    evidence: ['scripts/generate-contract-bundle.mjs'],
-    residualRisk: '"不留下半份产物"覆盖的是生成器自己写的那几个文件（snapshot + 全量回滚）。'
-      + '进程在 rename 之间被 SIGKILL 时的行为没有测试；非 POSIX 文件系统上 rename 的原子性属于外部假设。',
+    evidence: ['scripts/generate-contract-bundle.mjs', 'src/shared/atomic-write.mjs', 'scripts/atomic-write.test.mjs'],
+    residualRisk: '"不留下半份产物"由 src/shared/atomic-write.mjs 的两阶段写保证（全部 temp 写完才开始 rename，'
+      + 'rename 阶段失败按阶段零的快照回滚），且**回滚路径本身有测试** —— 合并前四处写策略的回滚分支一条都没被测过，'
+      + 'v1-vertical-slice 那几条"失败时不覆盖旧 bundle"验的是校验阶段就 throw，写函数根本没被调用。'
+      + '仍未覆盖四件事：① 不做 fsync，"rename 成功后立刻掉电"仍可能丢字节（有意选择，四处原实现同样如此）；'
+      + '② 进程在两次 rename 之间被 SIGKILL 的行为没有测试；③ temp 的 0o600 权限位没有任何断言；'
+      + '④ 非 POSIX 文件系统上 rename 的原子性属于外部假设。',
     docRefs: ['SKILL.md §2', 'SCHEMA.md §5'],
   },
   {

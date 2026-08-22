@@ -22,6 +22,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { writeFilesAtomic } from '../src/shared/atomic-write.mjs'
 import { findZones } from '../src/truth/adapters/zones.mjs'
 import { CHECKS, invariantsOfKind, validateRegistry } from '../registry/invariants.mjs'
 
@@ -168,17 +169,20 @@ export function planDocs(repoRoot, targets = DOC_TARGETS) {
   return { problems, files }
 }
 
-/** 落盘。与仓库其它写点一致：先写 tmp 再 rename，避免中断留下半份文件。 */
+/**
+ * 落盘。
+ *
+ * 这里原本的注释写着"与仓库其它写点一致：先写 tmp 再 rename"—— 而当时并不
+ * 一致：generate-contract-bundle 根本没有 temp，且这里的 temp 名是固定的
+ * `${abs}.tmp-render`，两个并发的 render-docs 会写同一个 temp 再各自 rename，
+ * 其中一个的输出会静默变成另一个的。现在四处真的走同一个实现了。
+ *
+ * 顺带升级：两个文档文件现在同生同死，不再可能只写进去一个。
+ */
 export function applyDocPlan(files) {
-  const written = []
-  for (const f of files) {
-    if (!f.changed) continue
-    const tmp = `${f.abs}.tmp-render`
-    fs.writeFileSync(tmp, f.nextLines.join('\n'), 'utf8')
-    fs.renameSync(tmp, f.abs)
-    written.push(f.file)
-  }
-  return written
+  const changed = files.filter((file) => file.changed)
+  writeFilesAtomic(changed.map((file) => ({ target: file.abs, content: file.nextLines.join('\n') })))
+  return changed.map((file) => file.file)
 }
 
 const HELP = `用法：node scripts/render-docs.mjs [--check|--write]

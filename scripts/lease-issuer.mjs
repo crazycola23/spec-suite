@@ -29,8 +29,8 @@ import {
   stableJson,
   stringSet,
   validatePolicyFileRules,
-  writeJsonAtomic,
 } from './control-plane-common.mjs'
+import { writeFileAtomic } from '../src/shared/atomic-write.mjs'
 import { projectContext } from './project-context.mjs'
 
 function parseArgs(argv) {
@@ -294,7 +294,13 @@ async function main() {
     const lease = issueLease({ options })
     if (options.output) {
       const root = path.resolve(options.specsRoot ?? '.')
-      writeJsonAtomic(resolveInside(root, options.output, '--output'), lease)
+      // 0o600：lease 是签名凭证，不该对同机其它用户可读。
+      // 序列化与下面 stdout 分支逐字相同，两条路径的字节因此必然一致。
+      writeFileAtomic(
+        resolveInside(root, options.output, '--output'),
+        `${stableJson(lease, 2)}\n`,
+        { mode: 0o600 },
+      )
     } else {
       process.stdout.write(`${stableJson(lease, 2)}\n`)
     }

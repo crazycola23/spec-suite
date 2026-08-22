@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { writeFilesAtomic } from '../src/shared/atomic-write.mjs'
 import { assertSchemaVersion, schemaVersionHint } from '../src/shared/schema-version.mjs'
 import { loadYamlLib, readText } from './check-spec-suite.mjs'
 
@@ -56,13 +57,9 @@ function nextGapCode(gaps) {
 }
 
 function writePreparedFiles(files) {
-  const prepared = files.map(({ target, content }) => {
-    fs.mkdirSync(path.dirname(target), { recursive: true })
-    const temp = `${target}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`
-    fs.writeFileSync(temp, content, 'utf8')
-    return { target, temp }
-  })
-  for (const item of prepared) fs.renameSync(item.temp, item.target)
+  // 原实现已经是"先全写 temp、再全 rename"，但 rename 中途失败时既不回滚也
+  // 不清 temp —— 会留下一半迁移过的文件加一地 .tmp-*。共享实现补上这两块。
+  writeFilesAtomic(files)
 }
 
 export async function migrateUnresolved(options) {
