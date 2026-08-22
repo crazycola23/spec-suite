@@ -53,5 +53,5 @@ schema 格式，那正是本仓库第一条 invariant 禁止的事（unknown sta
 **不会**返回一个「什么都不做」的恒等迁移 —— 那会让调用方误以为迁移成功。
 降级请求（`to < from`）在 `forward-only` 下同样被拒绝。
 
-这条性质由 [`scripts/schema-version.test.mjs`](../scripts/schema-version.test.mjs)
+这条性质由 [`tests/unit/schema-version.test.mjs`](../tests/unit/schema-version.test.mjs)
 锁住：注册表为空时，任何 `(kind, from→to)` 都必须不被支持。

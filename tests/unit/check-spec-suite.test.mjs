@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** check-spec-suite.mjs 的单元测试。node --test scripts/check-spec-suite.test.mjs */
+/** check-spec-suite.mjs 的单元测试。node --test tests/unit/check-spec-suite.test.mjs */
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -16,14 +16,17 @@ import {
   checkCoverageMatrix, run,
   RENDERERS, resolveProjection, enumerateProjections, findZones,
   parseBanCoverage, renderReportMd,
-} from './check-spec-suite.mjs'
+} from '../../scripts/check-spec-suite.mjs'
 
 import { fileURLToPath } from 'node:url'
-const HERE = path.dirname(fileURLToPath(import.meta.url))
+// 这个文件里原来的 `HERE` 每一处用法都是 `path.join(HERE, '..')` —— 也就是说它
+// 真正想表达的一直是「仓库根」。搬到 tests/unit/ 之后深度变了，索引直接写成 REPO，
+// 免得再留一个"差一级"的中间量。
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 // 复用 checker 自己的解析链（本目录 → --specs-root → cwd），失败时给的是那条可执行的
 // 错误信息（`npm i yaml@^2`），而不是裸的 ERR_MODULE_NOT_FOUND。本 skill 目录**不签入**
 // node_modules，所以跑测试前先在 skill 根执行一次 `npm i`。
-const YAML = await loadYamlLib(path.join(HERE, '..'))
+const YAML = await loadYamlLib(REPO)
 
 // ---------------------------------------------------------------------------
 // 工具
@@ -900,7 +903,7 @@ test('检查 7：矩阵文件的 glob 匹配不到任何文件 → 按声明的 
 // ---------------------------------------------------------------------------
 
 test('A：templates/L0/example 跑完整 run() → 0 error', async () => {
-  const exampleDir = path.join(HERE, '..', 'templates', 'L0', 'example')
+  const exampleDir = path.join(REPO, 'templates', 'L0', 'example')
   const r = await run({
     specsRoot: exampleDir,
     config: path.join(exampleDir, 'spec-suite.config.json'),
@@ -915,7 +918,7 @@ test('A：templates/L0/example 跑完整 run() → 0 error', async () => {
 // 复用 example 的 Agent Entry adapter、canonical source 与 dictionary，只把路径换成 flat —— 这样测的是布局，
 // 不是把 example 已经覆盖过的 schema / 禁令覆盖再测一遍。
 test('flat 布局（无编号目录）跑完整 run() → 0 error', async () => {
-  const ex = path.join(HERE, '..', 'templates', 'L0', 'example')
+  const ex = path.join(REPO, 'templates', 'L0', 'example')
   const flatten = (s) => s.replaceAll('10-why/02-业务规则.md', 'rules.md')
 
   const root = buildFixture({
@@ -964,7 +967,7 @@ test('flat 布局（无编号目录）跑完整 run() → 0 error', async () => 
 // 文件存在却没有任何入口指向它，等于不存在（"agent 不会主动去读它不知道存在的文件"）。
 // ---------------------------------------------------------------------------
 
-const SKILL_ROOT = path.join(HERE, '..')
+const SKILL_ROOT = REPO
 const SKILL_DOCS = ['SKILL.md', 'SCHEMA.md', 'DISCIPLINES.md', 'INTERVIEW.md']
 const docText = SKILL_DOCS.map((f) => fs.readFileSync(path.join(SKILL_ROOT, f), 'utf8')).join('\n')
 const skillMd = fs.readFileSync(path.join(SKILL_ROOT, 'SKILL.md'), 'utf8')

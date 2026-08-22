@@ -7,14 +7,18 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { jsonDigest, stableJson } from './control-plane-common.mjs'
-import { loadIssuerDaemonConfig } from './control-plane-trust.mjs'
-import { blankComments } from './check-architecture.mjs'
-import { classifyEffect, interceptEffect } from './enforce-effect.mjs'
-import { projectContext } from './project-context.mjs'
+import { jsonDigest, stableJson } from '../../scripts/control-plane-common.mjs'
+import { loadIssuerDaemonConfig } from '../../scripts/control-plane-trust.mjs'
+import { blankComments } from '../../scripts/check-architecture.mjs'
+import { classifyEffect, interceptEffect } from '../../scripts/enforce-effect.mjs'
+import { projectContext } from '../../scripts/project-context.mjs'
 
-const HERE = path.dirname(fileURLToPath(import.meta.url))
-const REPO_ROOT = path.join(HERE, '..')
+// 这个文件搬到 tests/adversarial/ 之前，只有一个 `HERE` 常量，而它同时被当作两个
+// 意思用：「scripts 目录」（spawn 被测 CLI）与「仓库根的下一级」（`HERE/..`）。
+// 在 scripts/ 下这两个意思恰好都对，所以重合是看不见的；搬家之后它们指向不同深度。
+// 拆成两个显式常量并**删掉 HERE**，让这种重合不可能再长回来。
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+const SCRIPTS = path.join(REPO_ROOT, 'scripts')
 const CONTROL_PLANE = path.join(REPO_ROOT, 'control-plane')
 const GRAPH = 'control-plane/example/context-graph.json'
 const TASK = 'control-plane/example/task.json'
@@ -189,7 +193,7 @@ function makeHarness() {
 }
 
 async function startDaemon(script, configPath) {
-  const child = spawn(process.execPath, [path.join(HERE, script), '--config', configPath], {
+  const child = spawn(process.execPath, [path.join(SCRIPTS, script), '--config', configPath], {
     cwd: REPO_ROOT,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
@@ -279,7 +283,7 @@ function persistProjection(harness, projection = projectContext(projectionOption
 
 function runIssuer(harness, overrides = {}) {
   const args = [
-    path.join(HERE, 'lease-issuer.mjs'),
+    path.join(SCRIPTS, 'lease-issuer.mjs'),
     '--specs-root', harness.specsRoot,
     '--graph', GRAPH,
     '--task', TASK,
@@ -812,7 +816,7 @@ test('P2：effect class 恰好是这 3 个，新增一类会撞上这条测试',
   // 这里不打算让新增 class 变得不可能，只打算让它**不可能悄悄发生**：往
   // classifyEffect 的 if 链里加一个 kind，就会撞上下面这条断言，作者会被迫
   // 来读这段注释、并解释新 class 为什么不需要走统一授权模型。
-  const src = fs.readFileSync(path.join(HERE, 'enforce-effect.mjs'), 'utf8')
+  const src = fs.readFileSync(path.join(SCRIPTS, 'enforce-effect.mjs'), 'utf8')
   const classify = kindsIn(functionSource(src, 'export function classifyEffect('))
 
   assert.deepEqual(
@@ -839,7 +843,7 @@ test('P2：只有 file.write 能被 baseline 免 lease，新 effect class 天生
   //
   // 这是 fail-closed 的方向。反过来（新 class 默认可被 baseline 命中）会让
   // 一条 resourcePrefix 意外授权一整类全新的副作用。
-  const src = fs.readFileSync(path.join(HERE, 'enforce-effect.mjs'), 'utf8')
+  const src = fs.readFileSync(path.join(SCRIPTS, 'enforce-effect.mjs'), 'utf8')
   const baseline = kindsIn(functionSource(src, 'function baselineAuthorizes('))
   assert.deepEqual(
     [...baseline], ['file.write'],

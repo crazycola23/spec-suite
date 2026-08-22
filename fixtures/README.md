@@ -31,8 +31,9 @@ schemaVersion 命名的子目录，并在这张表里补一行说明命名含义
 ### `v1/` —— 手写，刻意与 `templates/L0/example` 不同形
 
 手写而非从 `templates/L0/example` 复制，原因是：`templates/L0/example` **已经**
-是 checker 自己的**活**夹具（`scripts/check-spec-suite.test.mjs:902` 断言它
-缺陷为 0，`scripts/v1-vertical-slice.test.mjs:298` 从它复制）。活夹具跟随 HEAD
+是 checker 自己的**活**夹具（`tests/unit/check-spec-suite.test.mjs` 的
+「A：templates/L0/example 跑完整 run() → 0 error」断言它缺陷为 0，
+`tests/integration/v1-vertical-slice.test.mjs` 从它复制）。活夹具跟随 HEAD
 演进，冻结语料必须不演进 —— 把它复制过来，等于给同一份内容造出第二个权威，
 正好是本次重构要消除的「多真相源」问题，还顶着"修复它"的名义。
 
@@ -40,7 +41,7 @@ schemaVersion 命名的子目录，并在这张表里补一行说明命名含义
 agent-entry（顶层 `schemaVersion`）、config（顶层 `schemaVersion`）、
 unresolved registry、生成物 manifest。它**不**演示两区制（`agentEntry.adapters`
 是空数组、`projections` 是空对象）——那由 `templates/L0/example` 与
-`scripts/zones.test.mjs` 覆盖，这里不重复。
+`tests/unit/zones.test.mjs` 覆盖，这里不重复。
 
 字典里有一个非 `gaps` 集合（`errors`）是**必需的**，不是凑数：生成器只跳过
 `meta`/`gaps` 两个键，若字典里只有 `gaps`，`contract-bundle.json` 的
@@ -59,7 +60,7 @@ artifact 通过 —— 绿灯，但什么也没证明。
 **仓库根相对路径**（`control-plane/example/…`、`control-plane/global-safety-kernel.md`）。
 保持这一层目录结构，用 `--specs-root fixtures/v2` 就能让所有路径原样解析，
 于是复制可以是**纯字节复制、零改写**，digest 依然有效。这也正是
-`scripts/v2-control-plane.test.mjs` 的 `makeHarness()` 的做法（它把整个
+`tests/adversarial/v2-control-plane.test.mjs` 的 `makeHarness()` 的做法（它把整个
 `control-plane/` 复制进临时目录）。
 
 冻结之后，`fixtures/v2/` 与 `control-plane/` 会随着后者演进而**分叉**。
@@ -83,7 +84,7 @@ artifact 通过 —— 绿灯，但什么也没证明。
 
 ## 冻结是怎么强制的
 
-`scripts/compatibility.test.mjs` 里有一个**整树 digest 锁**：把 `fixtures/`
+`tests/compatibility/compatibility.test.mjs` 里有一个**整树 digest 锁**：把 `fixtures/`
 下每个文件的 `{path, sha256}` 排序后求一个 digest，与写死在测试里的期望值比对。
 任何文件的任何一个字节变了，这个断言就会失败并打印出变动的文件。
 
@@ -95,6 +96,11 @@ artifact 通过 —— 绿灯，但什么也没证明。
 3. 把新 digest 填回测试里的期望常量。
 
 第 2 步是重点。锁的作用不是禁止改动，是让改动无法**悄悄**发生。
+
+本文引用测试时只写**文件 + 测试名**，不写行号。这不是风格偏好：测试文件从
+`scripts/` 搬进 `tests/` 那次，本文的 `:902` 与 `:298` 两处行号同时因为目录改变
+**和**文件头行数变化而指错了行，而没有任何东西报错 —— 冻结语料里的引用尤其
+经不起这个，因为它按设计不跟随 HEAD。测试名只会被有意的改动改掉，行号不会。
 
 唯一被排除在锁外的路径是 `v2/control-plane/example/generated/`——它被复制过来的
 `.gitignore` 忽略，是派生输出的落点（有人本地跑一次 projection 就会生成它）。

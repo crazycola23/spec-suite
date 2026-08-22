@@ -5,7 +5,7 @@
   "description": "spec-suite skill 自身的开发依赖。审计别人的规格库不需要在这里装 —— checker 会用被审计库自己的 yaml。只有要跑本 skill 的单测时先 `npm i`。",
   "type": "module",
   "scripts": {
-    "test": "node --test scripts/*.test.mjs",
+    "test": "node --test tests/*/*.test.mjs",
     "arch": "node scripts/check-architecture.mjs",
     "docs": "node scripts/render-docs.mjs",
     "trust-report": "node scripts/trust-report.mjs"

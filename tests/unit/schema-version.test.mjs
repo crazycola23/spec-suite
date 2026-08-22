@@ -18,10 +18,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { SCHEMA_POLICY, VERDICT, assertSchemaVersion, checkSchemaVersion, schemaVersionHint } from '../src/shared/schema-version.mjs'
-import { MIGRATIONS, migrationKey, planMigration } from '../migrations/index.mjs'
+import { SCHEMA_POLICY, VERDICT, assertSchemaVersion, checkSchemaVersion, schemaVersionHint } from '../../src/shared/schema-version.mjs'
+import { MIGRATIONS, migrationKey, planMigration } from '../../migrations/index.mjs'
+// 只为最后那条源级锁要扫的根清单；单一来源见 check-architecture.mjs 里 ROOTS 的注释。
+import { ROOTS } from '../../scripts/check-architecture.mjs'
 
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const KINDS = Object.keys(SCHEMA_POLICY)
 
 /** 按 versionPath 造一份最小文档。 */
@@ -249,12 +251,14 @@ test('全仓库没有 schemaVersion 的 `??` 默认值（隐藏 fallback 的源�
   // 只跳这一个文件，其余测试文件照样在扫描范围内。
   const self = fileURLToPath(import.meta.url)
   const offenders = []
+  let scanned = 0
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (e.name === 'node_modules' || e.name === '.git') continue
       const abs = path.join(dir, e.name)
       if (e.isDirectory()) { walk(abs); continue }
       if (!e.name.endsWith('.mjs') || abs === self) continue
+      scanned += 1
       const src = fs.readFileSync(abs, 'utf8')
       src.split('\n').forEach((line, i) => {
         // 只查版本相关的 ?? 默认值；loadConfig 的配置默认值按 D13 保留
@@ -264,9 +268,23 @@ test('全仓库没有 schemaVersion 的 `??` 默认值（隐藏 fallback 的源�
       })
     }
   }
-  for (const root of ['src', 'scripts', 'migrations']) {
+  // 根清单单一来源在 check-architecture.mjs，与架构检查同一片范围。`tests` 在其中，
+  // 所以上面那句「其余测试文件照样在扫描范围内」是真的 —— 测试文件原先住在
+  // scripts/ 下本来就被扫着，搬进 tests/ 后若少了这个根，13 个文件会**静默**退出
+  // 扫描范围，而 offenders 照旧是空：锁看着还绿，覆盖面已经少了一片。
+  //
+  // 这条 sweep 与本仓库其他源级锁不同：它**不**跳过 `.test.mjs`。隐藏 fallback 藏进
+  // 测试辅助代码一样是隐藏 fallback，所以扫描面要更宽，而不是更窄。也正因如此，
+  // 这里的逐根 `> 0` 对 tests/ 同样成立，不需要像那几条锁一样给它开例外。
+  //
+  // 逐根 `> 0` 管「某个根不再有文件」；总量下限管另一种失效：进了根目录却没递归
+  // 进子目录。两者互不覆盖 —— 少掉 tests/ 那 13 个，剩下 44 个照样过得了下限。
+  for (const root of ROOTS) {
     const abs = path.join(REPO, root)
+    const before = scanned
     if (fs.existsSync(abs)) walk(abs)
+    assert.ok(scanned > before, `${root}/ 下一个 .mjs 都没扫到 —— REPO 层级算错了，或这个根已改名/被删`)
   }
+  assert.ok(scanned >= 40, `只扫到 ${scanned} 个 .mjs —— 递归可能断了，这条锁正在空过`)
   assert.deepEqual(offenders, [], `版本号不允许有 ?? 默认值：\n${offenders.join('\n')}`)
 })

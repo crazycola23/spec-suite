@@ -31,7 +31,23 @@ import { LAYERS, edgeAllowed, layerOf } from '../src/layers.mjs'
 // migrations/ 与 registry/ 也在扫描范围内：两者都是被 src/ 反向依赖的叶子
 // （truth → registry），漏扫就等于放开了它们的方向约束 —— 例如
 // shared → migrations 会让 shared 不再是叶子层，registry → truth 会成环。
-const ROOTS = ['src', 'scripts', 'migrations', 'registry']
+//
+// tests/ 必须在列：测试文件原先住在 scripts/ 下，本来就被扫着。它们搬进 tests/
+// 之后若不把这个根加上，13 个文件会**静默**退出扫描范围 —— 违规数照旧是 0，
+// 而"测试的相对 import 全部解析到真实文件""测试不参与环"这两条保证会悄悄消失。
+// 搬家不该顺手削弱检查面，所以这里跟着搬。数量是可核对的：搬家前后都是 58 个
+// .mjs（13 个换了目录，没有增减）。
+//
+// 导出，因为这份「本仓库自己的源码住在哪」是好几处 sweep 的共同前提：架构检查
+// 之外，argv / canonical-json / paths / schema-version 四条源级锁也要走同一片
+// 范围。此前它们各抄一份数组 —— 四份必须同步才有意义，却没有任何东西强制同步，
+// 正是 P1 要消掉的那种多真相源。单一来源同时白拿了一层保护：`tests` 若从这里
+// 被删掉，architecture.test.mjs:84 那条「测试节点必须在图里」立刻变红。
+//
+// 注意这份清单**不是**"仓库里所有目录"：fixtures/ 与 templates/ 被有意排除。
+// 它们是冻结语料与下游样板，代表**别人的**仓库；把那里的字节当成本仓库的实现
+// 证据，会让源级锁对着语料假红。
+export const ROOTS = ['src', 'scripts', 'migrations', 'registry', 'tests']
 
 /**
  * 把注释替换成等长空白，字符串 / 模板字面量原样保留。

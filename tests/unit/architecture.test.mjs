@@ -5,11 +5,11 @@ import path from 'node:path'
 import test from 'node:test'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { blankComments, buildImportGraph, checkArchitecture, checkLayers, findCycles, staticSpecifiers } from './check-architecture.mjs'
-import { loadAuthorityRecords } from './control-plane-common.mjs'
-import { layerOf } from '../src/layers.mjs'
+import { blankComments, buildImportGraph, checkArchitecture, checkLayers, findCycles, staticSpecifiers } from '../../scripts/check-architecture.mjs'
+import { loadAuthorityRecords } from '../../scripts/control-plane-common.mjs'
+import { layerOf } from '../../src/layers.mjs'
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 test('import 图无环，且相对 import 全部解析到真实文件', () => {
   const r = checkArchitecture(repoRoot)
@@ -81,7 +81,7 @@ test('facade 的 re-export 边与跨行 import 边都进了图', () => {
   assert.ok(facade.includes('src/truth/cli/check.mjs'))
 
   // 测试文件用的是跨行 `import {`，按行扫会漏
-  const unitTest = graph.get('scripts/check-spec-suite.test.mjs')
+  const unitTest = graph.get('tests/unit/check-spec-suite.test.mjs')
   assert.ok(unitTest?.includes('scripts/check-spec-suite.mjs'), '跨行 import 边没被收集')
 })
 
@@ -166,8 +166,21 @@ test('layerOf 用最长前缀，不用先匹配', () => {
   assert.equal(layerOf('scripts/check-spec-suite.mjs'), 'facade')
   assert.equal(layerOf('scripts/enforce-effect.mjs'), 'control')
   assert.equal(layerOf('scripts/effect-enforcer-daemon.mjs'), 'cli')
-  // 测试文件按后缀归类，与所在目录无关
+  // 测试文件按后缀归类，与所在目录无关。这句话原先只用一个 `scripts/` 下的路径
+  // 断言，也就是说"与目录无关"其实没被证明 —— 只有一个目录被试过。测试搬进
+  // tests/ 之后正好有了两种形状，两个都钉上，这句注释才真的有机器后盾。
+  //
+  // 这一条同时是 layers.mjs 那个决定的护栏：FILE_LAYERS 里**故意没有** `tests/`
+  // 规则。后缀在 FILE_LAYERS 之前生效，所以加一条 `tests/` → test 今天是死代码，
+  // 而将来 tests/ 下出现一个非 .test.mjs 的辅助模块时，它会把那个文件自动归成
+  // 「可以 import 任何层」—— 那正是 permissive-by-default，本仓库禁止的隐藏
+  // fallback。不加规则，那个文件就是**未归类**，check-architecture 会吵起来，
+  // 逼人显式归类。
+  assert.equal(layerOf('tests/adversarial/v2-control-plane.test.mjs'), 'test')
   assert.equal(layerOf('scripts/v2-control-plane.test.mjs'), 'test')
+  assert.equal(layerOf('a/b/c/d/anything.test.mjs'), 'test')
+  // 反面：tests/ 下的非测试文件**没有**归属层 —— 目录不是归类依据。
+  assert.equal(layerOf('tests/unit/helper.mjs'), null)
   // 没有任何规则匹配 ⇒ null，调用方必须当违规处理
   assert.equal(layerOf('scripts/brand-new-script.mjs'), null)
 })
@@ -277,5 +290,66 @@ test('V1 拒绝 V2 形状的 gap 记录', () => {
     assert.match(r.stdout, new RegExp(`缺必填键 \\\`${key}\\\``), `V1 没要求 \`${key}\` —— 两侧必填集合可能被合并了`)
   }
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+// ---------------------------------------------------------------------------
+// npm test 的发现面：glob 够不着的测试文件等于不存在
+// ---------------------------------------------------------------------------
+//
+// 测试从 scripts/ 搬进 tests/ 之后，`npm test` 的 glob 从 `scripts/*.test.mjs`
+// 变成 `tests/*/*.test.mjs`。单层 `*` 恰好匹配一段路径 —— 既不匹配零段也不跨
+// `/`。于是有两种文件会被**静默**漏掉：
+//
+//   tests/smoke.test.mjs            （深度 0，少一段）
+//   tests/adversarial/v2/x.test.mjs （深度 2，多一段）
+//
+// 漏掉的形状很危险，因为它不报错：`node --test` 对没匹配上的文件毫无意见，
+// 退出码 0，摘要里少了几条 —— 而没有人记得摘要该有几条。写下一个测试的人
+// 会以为它在跑。这条锁把「该跑」和「真的在跑」之间那个缺口钉上。
+//
+// 这条锁**不**证明的事，值得写清楚：它证明的是每个文件都落在那个 pattern
+// 够得着的深度上，不是「node 或 shell 真的展开了它」。展开由两套互不相干的
+// 机制负责（CI 上是 bash，Windows 上是 node 自己的 glob 引擎，v21+ 才有），
+// 两套都验过能用，但都不在本进程里。把 pattern 语义在这里再实现一遍只会造出
+// 第三套 —— 而三套里最宽松的那套决定了这条锁有多空。所以这里只查深度：
+// 那是 `*` 唯一保证的性质，也是唯一不需要模拟就能查的性质。
+test('tests/ 下每个测试文件都落在 npm test 的 glob 够得着的深度上', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
+  const pattern = pkg.scripts.test.split(/\s+/).find((t) => t.includes('.test.mjs'))
+  assert.ok(pattern, `package.json 的 test 脚本里找不到测试文件 glob：${pkg.scripts.test}`)
+
+  // 先钉住前提。深度推断只在「中间每一段恰好是一个 `*`」时成立，所以 pattern
+  // 本身也要被锁住：改成 `tests/**/*.test.mjs` 会在这里红，那是**好事** ——
+  // `**` 在 bash 与 node glob 引擎下的行为不一致（bash 默认不开 globstar），
+  // 这种改动需要有人想过，而不是顺手改完就绿。
+  const segments = pattern.split('/')
+  assert.deepEqual(
+    segments, ['tests', '*', '*.test.mjs'],
+    `npm test 的发现 pattern 变了（现在是 ${pattern}）。下面按段数推深度的做法只对\n`
+    + '「每段一个 `*`」成立。若确实要换 pattern，请连带重新论证这条锁怎么查覆盖面。',
+  )
+
+  const files = []
+  const walk = (rel) => {
+    for (const e of fs.readdirSync(path.join(repoRoot, rel), { withFileTypes: true })) {
+      const next = `${rel}/${e.name}`
+      if (e.isDirectory()) { walk(next); continue }
+      if (e.isFile() && e.name.endsWith('.test.mjs')) files.push(next)
+    }
+  }
+  walk('tests')
+
+  // 非空性守卫：`unreachable` 为空只有在 files 非空时才有意义 —— 一个扫不到
+  // 文件的 walker 同样给出空数组。
+  assert.ok(files.length >= 10, `tests/ 下只扫到 ${files.length} 个测试文件 —— 递归可能断了，这条锁正在空过`)
+
+  const unreachable = files.filter((f) => f.split('/').length !== segments.length)
+  assert.deepEqual(
+    unreachable, [],
+    `这些测试文件的深度对不上 \`${pattern}\`，npm test 不会跑到它们：\n`
+    + `${unreachable.join('\n')}\n`
+    + '要么把文件挪到 tests/<分类>/ 下（恰好一层），要么改 pattern 并更新上面那条断言。\n'
+    + '不要只改文件位置就走 —— 漏跑不会报错，只会让摘要里少几条。',
+  )
 })
 

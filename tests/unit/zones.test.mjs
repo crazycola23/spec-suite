@@ -15,9 +15,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { makeCollector } from '../src/truth/diagnostics/collector.mjs'
-import { RENDERERS } from '../src/truth/projections/renderers.mjs'
-import { applyZonePlan, checkZones, planZones } from '../src/truth/adapters/zones.mjs'
+import { makeCollector } from '../../src/truth/diagnostics/collector.mjs'
+import { RENDERERS } from '../../src/truth/projections/renderers.mjs'
+import { applyZonePlan, checkZones, planZones } from '../../src/truth/adapters/zones.mjs'
 
 const CONFIG = {
   markdownGlobs: ['**/*.md'],

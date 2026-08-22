@@ -19,7 +19,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { writeFileAtomic, writeFilesAtomic } from '../src/shared/atomic-write.mjs'
+import { writeFileAtomic, writeFilesAtomic } from '../../src/shared/atomic-write.mjs'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-atomic-'))
 

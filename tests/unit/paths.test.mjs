@@ -62,12 +62,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { isInside } from '../src/shared/paths.mjs'
-import { blankComments } from './check-architecture.mjs'
-import { resolveInside as resolveInsideV2 } from './control-plane-common.mjs'
-import { inspectUnresolvedFact } from './guard-unresolved-fact.mjs'
+import { isInside } from '../../src/shared/paths.mjs'
+import { ROOTS, blankComments } from '../../scripts/check-architecture.mjs'
+import { resolveInside as resolveInsideV2 } from '../../scripts/control-plane-common.mjs'
+import { inspectUnresolvedFact } from '../../scripts/guard-unresolved-fact.mjs'
 
-const REPO = path.resolve(import.meta.dirname, '..')
+const REPO = path.resolve(import.meta.dirname, '..', '..')
 
 /** 取 message 而不是用 assert.throws(fn, /re/) —— 后者匹配的是带 `Error: ` 前缀的 String(err)。 */
 const msg = (fn) => { try { fn(); return null } catch (e) { return e.message } }
@@ -255,10 +255,23 @@ function sourceFiles() {
       out.push({ rel: path.relative(REPO, abs).split(path.sep).join('/'), abs })
     }
   }
-  for (const root of ['src', 'scripts', 'migrations', 'registry']) {
+  // 非空性守卫：靠这个 helper 的三条 sweep 里有两条结论是「offenders 为空」，而
+  // 一个扫不到任何文件的 walker 同样给出空 —— 那种绿灯什么也没证明。测试文件从
+  // scripts/ 搬进 tests/ 时 REPO 的层级正好变过一次，所以这不是假想风险。
+  //
+  // 两条断言各管一种失效：逐根 `> 0` 抓「某个根不再有文件」；总量下限抓「进了
+  // 根目录却没递归进子目录」—— src/ 顶层只有 layers.mjs，光看逐根会漏过后者。
+  //
+  // 根清单单一来源在 check-architecture.mjs，与架构检查同一片范围。
+  for (const root of ROOTS) {
     const abs = path.join(REPO, root)
+    const before = out.length
     if (fs.existsSync(abs)) walk(abs)
+    // tests/ 目前全是 `.test.mjs`，被上面的过滤器排掉，一个都不贡献 —— 预期如此。
+    if (root === 'tests') continue
+    assert.ok(out.length > before, `${root}/ 下一个非测试 .mjs 都没扫到 —— REPO 层级算错了，或这个根已改名/被删`)
   }
+  assert.ok(out.length >= 30, `全仓库只扫到 ${out.length} 个非测试 .mjs —— 递归可能断了，源级锁正在空过`)
   return out
 }
 

@@ -33,10 +33,52 @@ import { pathToFileURL } from 'node:url'
 
 import {
   MESSAGES_EN, MESSAGES_ZH, parseExactConfigFlag, parseFlags, parseFlagsOrThrow,
-} from '../src/shared/argv.mjs'
-import { blankComments } from './check-architecture.mjs'
+} from '../../src/shared/argv.mjs'
+import { ROOTS, blankComments } from '../../scripts/check-architecture.mjs'
 
-const REPO = path.resolve(import.meta.dirname, '..')
+const REPO = path.resolve(import.meta.dirname, '..', '..')
+
+// 源级锁扫描的根：单一来源在 check-architecture.mjs。本文件里有两条 sweep，原先
+// 各抄一份这个数组 —— 两份必须同步才有意义，而没有任何东西强制它们同步。
+//
+// 复用 ROOTS 意味着 `tests` 也在范围内，而下面两条 sweep 都跳过 `.test.mjs`，
+// 所以今天扫到的文件一个不多一个不少（tests/ 下 13 个文件全是 `.test.mjs`）。
+// 将来 tests/ 下出现非测试的辅助模块时，它会**自动**进入扫描范围 —— 一份藏在
+// 测试辅助代码里的 `未知参数：` 副本正是这两条锁要抓的东西。
+
+/**
+ * 走一遍 ROOTS 下的非测试 .mjs，并证明**确实扫到了东西**。
+ *
+ * 为什么需要这个证明：下面两条 sweep 的结论都是「offenders 为空」，而一个扫不到
+ * 任何文件的 walker 同样给出空 —— 那种绿灯什么都没证明。`REPO` 算错一级、某个
+ * 根被改名、递归断掉，三种情况都是这个形状。测试文件从 scripts/ 搬进 tests/ 时
+ * `REPO` 的层级正好变了，所以这不是假想风险。
+ *
+ * 两条断言各管一种失效：逐根 `> 0` 抓「某个根不再有文件」，总量下限抓「进了根
+ * 目录但没递归进子目录」—— src/ 顶层只有 layers.mjs，光看逐根会漏过后者。
+ */
+function sweepSourceRoots(visit) {
+  let scanned = 0
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, e.name)
+      if (e.isDirectory()) { walk(abs); continue }
+      if (!e.isFile() || !e.name.endsWith('.mjs') || e.name.endsWith('.test.mjs')) continue
+      scanned += 1
+      visit(abs, path.relative(REPO, abs).split(path.sep).join('/'))
+    }
+  }
+  for (const root of ROOTS) {
+    const abs = path.join(REPO, root)
+    const before = scanned
+    if (fs.existsSync(abs)) walk(abs)
+    // tests/ 目前全是 `.test.mjs`，被上面的过滤器排掉，所以它一个都不贡献 ——
+    // 这是预期的，不能要求它 > 0。
+    if (root === 'tests') continue
+    assert.ok(scanned > before, `${root}/ 下一个非测试 .mjs 都没扫到 —— REPO 层级算错了，或这个根已改名/被删`)
+  }
+  assert.ok(scanned >= 30, `全仓库只扫到 ${scanned} 个非测试 .mjs —— 递归可能断了，源级锁正在空过`)
+}
 
 /** 覆盖四种条目的样板 spec。逐个测试就地改造它，避免共享可变状态。 */
 const SPEC = {
@@ -267,20 +309,11 @@ test('parseExactConfigFlag：定长 argv，多一个少一个都拒绝', () => {
  */
 function argvConsumers() {
   const out = []
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const abs = path.join(dir, e.name)
-      if (e.isDirectory()) { walk(abs); continue }
-      if (!e.isFile() || !e.name.endsWith('.mjs') || e.name.endsWith('.test.mjs')) continue
-      const clean = blankComments(fs.readFileSync(abs, 'utf8'))
-      if (!/from\s*['"][^'"]*shared\/argv\.mjs['"]/.test(clean)) continue
-      out.push({ rel: path.relative(REPO, abs).split(path.sep).join('/'), abs, clean })
-    }
-  }
-  for (const root of ['src', 'scripts', 'migrations', 'registry']) {
-    const abs = path.join(REPO, root)
-    if (fs.existsSync(abs)) walk(abs)
-  }
+  sweepSourceRoots((abs, rel) => {
+    const clean = blankComments(fs.readFileSync(abs, 'utf8'))
+    if (!/from\s*['"][^'"]*shared\/argv\.mjs['"]/.test(clean)) return
+    out.push({ rel, abs, clean })
+  })
   return out
 }
 
@@ -288,23 +321,13 @@ test('两句 unknown 文案在全仓库只有一份定义', () => {
   // 合并的全部价值就在这一条上：从 10 份文案降到 2 份。若哪天又有人在自己的
   // CLI 里手写 `未知参数：${arg}`，这里会红 —— 那正是第 13 份解析器的起点。
   const offenders = []
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const abs = path.join(dir, e.name)
-      if (e.isDirectory()) { walk(abs); continue }
-      if (!e.isFile() || !e.name.endsWith('.mjs') || e.name.endsWith('.test.mjs')) continue
-      const rel = path.relative(REPO, abs).split(path.sep).join('/')
-      if (rel === 'src/shared/argv.mjs') continue
-      const clean = blankComments(fs.readFileSync(abs, 'utf8'))
-      for (const literal of ['未知参数', 'unknown argument']) {
-        if (clean.includes(literal)) offenders.push(`${rel}：${literal}`)
-      }
+  sweepSourceRoots((abs, rel) => {
+    if (rel === 'src/shared/argv.mjs') return
+    const clean = blankComments(fs.readFileSync(abs, 'utf8'))
+    for (const literal of ['未知参数', 'unknown argument']) {
+      if (clean.includes(literal)) offenders.push(`${rel}：${literal}`)
     }
-  }
-  for (const root of ['src', 'scripts', 'migrations', 'registry']) {
-    const abs = path.join(REPO, root)
-    if (fs.existsSync(abs)) walk(abs)
-  }
+  })
   assert.deepEqual(offenders, [], `unknown 文案只能定义在 src/shared/argv.mjs：\n${offenders.join('\n')}`)
 })
 

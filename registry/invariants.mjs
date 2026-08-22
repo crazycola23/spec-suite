@@ -10,7 +10,7 @@
 //      不再各自维护一份。
 //   2. 可表格化的文档段由它渲染（scripts/render-docs.mjs 写进
 //      BEGIN/END GENERATED 区），文档不再手抄。
-//   3. 它对代码的**断言本身被测试校验**（scripts/registry.test.mjs）：
+//   3. 它对代码的**断言本身被测试校验**（tests/unit/registry.test.mjs）：
 //      声称 machine-enforced 的规则必须指向真实存在、且真的发出那个 check id
 //      的模块。没有这一条，registry 只会变成第七份副本。
 //
@@ -223,7 +223,7 @@ export const INVARIANTS = [
     schemaVersions: [1],
     enforcement: ENFORCEMENT.MACHINE,
     checks: [1],
-    evidence: ['scripts/generate-contract-bundle.mjs', 'src/shared/atomic-write.mjs', 'scripts/atomic-write.test.mjs'],
+    evidence: ['scripts/generate-contract-bundle.mjs', 'src/shared/atomic-write.mjs', 'tests/unit/atomic-write.test.mjs'],
     residualRisk: '"不留下半份产物"由 src/shared/atomic-write.mjs 的两阶段写保证（全部 temp 写完才开始 rename，'
       + 'rename 阶段失败按阶段零的快照回滚），且**回滚路径本身有测试** —— 合并前四处写策略的回滚分支一条都没被测过，'
       + 'v1-vertical-slice 那几条"失败时不覆盖旧 bundle"验的是校验阶段就 throw，写函数根本没被调用。'
@@ -258,7 +258,7 @@ export const INVARIANTS = [
     schemaVersions: [1],
     enforcement: ENFORCEMENT.MACHINE,
     checks: [1],
-    evidence: ['src/shared/schema-version.mjs', 'scripts/compatibility.test.mjs'],
+    evidence: ['src/shared/schema-version.mjs', 'tests/compatibility/compatibility.test.mjs'],
     residualRisk: '只对**带 schemaVersion 字段**的 artifact 成立。dictionary 与 spec-suite.config.json '
       + '目前 requiredNow: false —— 字段缺失只 warn，见 GAP-SCHEMA-OPTIONAL。'
       + '未来 schema 的"拒绝"也只覆盖已登记的 7 个 kind；新增一类 artifact 而忘了登记，就没有版本闸门。',
@@ -470,7 +470,7 @@ export const INVARIANTS = [
     enforcement: ENFORCEMENT.MACHINE,
     checks: [],
     // 由 V2 projector 强制，不属于 V1 checker 的七类 —— 所以证据走 evidence。
-    evidence: ['scripts/project-context.mjs', 'scripts/v2-control-plane.test.mjs'],
+    evidence: ['scripts/project-context.mjs', 'tests/adversarial/v2-control-plane.test.mjs'],
     residualRisk: '强制的是单调性：uncertainty 增加时 `leaseEligible` 变 false、`privilegeCeiling` 变 none，'
       + 'issuer 随之拒签。证明不了"多给知识本身无害" —— 投影范围扩大时输出的文档摘要更多，'
       + '这部分内容进入 Agent 上下文的后果不在本纵切的验证范围内。',
@@ -508,7 +508,7 @@ export const INVARIANTS = [
     schemaKind: 'control-plane-document',
     enforcement: ENFORCEMENT.MACHINE,
     checks: [],
-    evidence: ['scripts/enforce-effect.mjs', 'scripts/lease-issuer.mjs', 'scripts/v2-control-plane.test.mjs'],
+    evidence: ['scripts/enforce-effect.mjs', 'scripts/lease-issuer.mjs', 'tests/adversarial/v2-control-plane.test.mjs'],
     residualRisk: '`keyId` 只与 `policy.keyId` 做字符串比较，**没有 keyId → 公钥的绑定**：'
       + '同时替换公钥文件与 policy.keyId 的攻击者可以让自造 Lease 通过校验。'
       + '公钥的可信度完全落在"trust root 不可被 Agent 写"这条外部假设上（见 CP-POSIX-IDENTITY）。',
@@ -524,7 +524,7 @@ export const INVARIANTS = [
     schemaKind: 'control-plane-document',
     enforcement: ENFORCEMENT.MACHINE,
     checks: [],
-    evidence: ['scripts/enforce-effect.mjs', 'scripts/v2-control-plane.test.mjs'],
+    evidence: ['scripts/enforce-effect.mjs', 'tests/adversarial/v2-control-plane.test.mjs'],
     residualRisk: '时间来自 `Date.now()`。**没有可信或单调时钟**（control-plane/README.md:86 已声明）：'
       + '能改系统时间的人可以让过期 Lease 复活，也可以让未生效 Lease 提前可用。'
       + '吊销是"读一次快照"，不是实时撤销 —— 吊销写入与下一次 enforcer 读取之间存在窗口。',
@@ -540,7 +540,7 @@ export const INVARIANTS = [
     schemaKind: 'control-plane-document',
     enforcement: ENFORCEMENT.MACHINE,
     checks: [],
-    evidence: ['scripts/control-plane-common.mjs', 'scripts/v2-control-plane.test.mjs'],
+    evidence: ['scripts/control-plane-common.mjs', 'tests/adversarial/v2-control-plane.test.mjs'],
     residualRisk: '重叠判定是路径前缀的双向 `startsWith`，在 `path.posix.normalize` 之后进行 —— '
       + '不做 realpath。两个经由不同符号链接指向同一目录的前缀不会被判为重叠。',
     docRefs: ['control-plane/README.md 已闭合的机器链'],
@@ -555,7 +555,7 @@ export const INVARIANTS = [
     schemaKind: 'control-plane-document',
     enforcement: ENFORCEMENT.MACHINE,
     checks: [],
-    evidence: ['scripts/enforce-effect.mjs', 'scripts/v2-control-plane.test.mjs'],
+    evidence: ['scripts/enforce-effect.mjs', 'tests/adversarial/v2-control-plane.test.mjs'],
     residualRisk: '证明的是"没写下 audit 就不执行"。**没有证明 audit 不可篡改**：'
       + '见 GAP-AUDIT-APPEND-ONLY。也没有覆盖"audit 写成功但进程随即被杀"这一窗口 —— '
       + '那种情况下 audit 里会留下一条实际未发生的 effect。',
@@ -571,7 +571,7 @@ export const INVARIANTS = [
     schemaKind: 'control-plane-document',
     enforcement: ENFORCEMENT.MACHINE,
     checks: [],
-    evidence: ['scripts/control-plane-common.mjs', 'scripts/control-plane-ipc.mjs', 'scripts/v2-control-plane.test.mjs'],
+    evidence: ['scripts/control-plane-common.mjs', 'scripts/control-plane-ipc.mjs', 'tests/adversarial/v2-control-plane.test.mjs'],
     residualRisk: '形状与四种 type（unresolved / authorization / classification / infrastructure）被测，'
       + 'G-17 那条的字段值被逐字钉住。但**整条 denial record 的字节稳定性没有测试** —— '
       + '新增一个可选字段不会让任何测试变红，下游若按整条记录做比对会静默受影响。',
@@ -587,7 +587,7 @@ export const INVARIANTS = [
     schemaKind: 'control-plane-document',
     enforcement: ENFORCEMENT.MACHINE,
     checks: [],
-    evidence: ['scripts/enforce-effect.mjs', 'scripts/v2-control-plane.test.mjs'],
+    evidence: ['scripts/enforce-effect.mjs', 'tests/adversarial/v2-control-plane.test.mjs'],
     residualRisk: '兜底靠两处 `throw`（分类器的 fall-through 与执行器的 `authorized effect lost its classifier`），'
       + '**不是构造上穷尽**：没有枚举或查表，分类链与执行链是两条独立的 if-chain。'
       + 'Phase 6 用源码普查锁住了两条链的 kind 集合（各 3 个、且必须相等），所以"只改一边"现在会变红；'
@@ -607,14 +607,14 @@ export const INVARIANTS = [
     checks: [],
     evidence: [
       'src/shared/paths.mjs',
-      'scripts/paths.test.mjs',
+      'tests/unit/paths.test.mjs',
       'scripts/enforce-effect.mjs',
       'scripts/control-plane-trust.mjs',
-      'scripts/v2-control-plane.test.mjs',
+      'tests/adversarial/v2-control-plane.test.mjs',
     ],
     residualRisk: '全仓库**没有一处用 realpath**：包含性判定一律是 `path.resolve` + `path.relative` + 字符串比较。'
       + '其中作用在 OS 路径上的 8 份逐字重复实现已合并为 `src/shared/paths.mjs` 的 `isInside` 一份'
-      + '（其行为由 scripts/paths.test.mjs 用变异测试逐项量过：`root/../x` 逃逸、`root/..` 父目录本身、'
+      + '（其行为由 tests/unit/paths.test.mjs 用变异测试逐项量过：`root/../x` 逃逸、`root/..` 父目录本身、'
       + '跨盘符、共享前缀的兄弟目录，以及"root 自身算在内"这一点被两个相反方向同时依赖的事实。'
       + '其中"父目录本身"与"兄弟目录"两项在合并前的整套测试里都是全绿的盲区）；'
       + '另有 3 处作用在 posix / URI 域上的检查刻意保持独立，因为它们的输入域与接受集不同。'

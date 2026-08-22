@@ -7,10 +7,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ENFORCEMENT, INVARIANTS } from '../registry/invariants.mjs'
+import { ENFORCEMENT, INVARIANTS } from '../../registry/invariants.mjs'
 import {
   buildTrustReport, main, parseArgv, renderJson, renderMd,
-} from './trust-report.mjs'
+} from '../../scripts/trust-report.mjs'
 
 /** 收集写入的字符串，替代 process.stdout / stderr。 */
 const sink = () => {
@@ -189,9 +189,15 @@ test('--help 走 stdout 并返回 0；正常运行把报告写 stdout', () => {
 })
 
 test('报告不落盘：模块里没有任何写文件的 import 或调用', async () => {
+  // 路径与文件顶部的静态 import 指向同一个模块。这里原先写的是 `./trust-report.mjs`
+  // —— 测试住在 scripts/ 下时它是对的，搬进 tests/unit/ 之后就指向了一个不存在的
+  // 文件。它没有静默变绿，只因为 readFile 会 ENOENT；这一点不该靠运气。
   const src = await (await import('node:fs/promises')).readFile(
-    new URL('./trust-report.mjs', import.meta.url), 'utf8',
+    new URL('../../scripts/trust-report.mjs', import.meta.url), 'utf8',
   )
+  // 所以先正向确认读到的**就是**那个模块：只有 doesNotMatch 的锁在读到空串或读错
+  // 文件时同样全绿（空串永远 doesNotMatch），那种绿灯什么也没证明。
+  assert.match(src, /用法：node scripts\/trust-report\.mjs/, '读到的不是 trust-report.mjs')
   // 派生物不能成为权威（N-02）。一份签进仓库的报告会立刻变成新的漂移面，
   // 所以这里从源码层面锁住"只写 stdout"。
   assert.doesNotMatch(src, /writeFileSync|writeFile\(|createWriteStream|node:fs/)

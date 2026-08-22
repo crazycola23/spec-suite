@@ -21,16 +21,18 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-import { jsonDigest } from './control-plane-common.mjs'
-import { projectContext } from './project-context.mjs'
-import { planMigration, MIGRATIONS } from '../migrations/index.mjs'
-import { SCHEMA_POLICY, VERDICT, checkSchemaVersion } from '../src/shared/schema-version.mjs'
+import { jsonDigest } from '../../scripts/control-plane-common.mjs'
+import { projectContext } from '../../scripts/project-context.mjs'
+import { planMigration, MIGRATIONS } from '../../migrations/index.mjs'
+import { SCHEMA_POLICY, VERDICT, checkSchemaVersion } from '../../src/shared/schema-version.mjs'
 
-const HERE = path.dirname(fileURLToPath(import.meta.url))
-const REPO_ROOT = path.join(HERE, '..')
+// 搬到 tests/compatibility/ 之后，原来那个 `HERE` 的两种用法（scripts 目录 /
+// 仓库根的下一级）不再重合，所以拆成两个显式常量，不留 HERE。
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+const SCRIPTS = path.join(REPO_ROOT, 'scripts')
 const FIXTURES = path.join(REPO_ROOT, 'fixtures')
-const CHECKER = path.join(HERE, 'check-spec-suite.mjs')
-const GENERATOR = path.join(HERE, 'generate-contract-bundle.mjs')
+const CHECKER = path.join(SCRIPTS, 'check-spec-suite.mjs')
+const GENERATOR = path.join(SCRIPTS, 'generate-contract-bundle.mjs')
 
 // ---------------------------------------------------------------------------
 // 冻结的期望值
@@ -53,7 +55,7 @@ const V2_PROJECTION_DIGEST_WITH_RUNBOOK = 'sha256:1dec2be2be3ddf3c28d5d37af57005
 // 整树锁：fixtures/ 下每个文件的 {path, sha256}，排序后求一个 digest。
 // 任何文件任何一个字节变了，这个值就变。更新它的正确流程见 fixtures/README.md
 // ——重点是必须在 commit message 里说明「为什么冻结语料需要变」。
-const FIXTURES_TREE_DIGEST = 'sha256:9094fefca1124b619ac7579596bbffce49c772600aa9ad26774ffabe9e5d2739'
+const FIXTURES_TREE_DIGEST = 'sha256:090fe526f7553368817295c47e3742583a3dcdac8c39affbb2ab62d97140e76c'
 
 // 唯一被排除在锁外的路径。被复制过来的 .gitignore 忽略它，且它是派生输出的
 // 落点（谁在本地跑一次 projection --output 就会生成）。清单被下面的测试断言

@@ -19,12 +19,12 @@ import path from 'node:path'
 import {
   CHECKS, DEFAULT_SCHEMA_KIND, ENFORCEMENT, INVARIANTS,
   checkById, checkIds, checkNames, groupByEnforcement, invariantsOfKind, validateRegistry,
-} from '../registry/invariants.mjs'
-import { SCHEMA_POLICY } from '../src/shared/schema-version.mjs'
-import { blankComments } from './check-architecture.mjs'
-import { maskFences, planDocs, ZONE_RENDERERS, DOC_TARGETS } from './render-docs.mjs'
+} from '../../registry/invariants.mjs'
+import { SCHEMA_POLICY } from '../../src/shared/schema-version.mjs'
+import { blankComments } from '../../scripts/check-architecture.mjs'
+import { maskFences, planDocs, ZONE_RENDERERS, DOC_TARGETS } from '../../scripts/render-docs.mjs'
 
-const REPO = path.resolve(import.meta.dirname, '..')
+const REPO = path.resolve(import.meta.dirname, '..', '..')
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8')
 
 test('registry 通过自身的结构校验', () => {

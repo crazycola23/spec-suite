@@ -8,12 +8,16 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { loadYamlLib } from './check-spec-suite.mjs'
-import { generateContractBundle } from './generate-contract-bundle.mjs'
+import { loadYamlLib } from '../../scripts/check-spec-suite.mjs'
+import { generateContractBundle } from '../../scripts/generate-contract-bundle.mjs'
 
-const HERE = path.dirname(fileURLToPath(import.meta.url))
-const SKILL_ROOT = path.join(HERE, '..')
-const FIXTURE_ROOT = path.join(HERE, 'fixtures', 'v1-vertical-slice')
+// 搬到 tests/integration/ 之后，原来那个 `HERE` 的三种用法各自指向不同深度：
+// 仓库根（`HERE/..`）、被 spawn 的 CLI（`HERE/<script>`）、以及语料目录
+// （`HERE/fixtures/...`）。语料**没有**跟着搬 —— 它是 scripts/fixtures/ 下的
+// 一棵树，被 SCHEMA.md 与 fixtures/README.md 按路径引用。所以这里三者都写清楚。
+const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+const SCRIPTS = path.join(SKILL_ROOT, 'scripts')
+const FIXTURE_ROOT = path.join(SCRIPTS, 'fixtures', 'v1-vertical-slice')
 const YAML = await loadYamlLib(SKILL_ROOT)
 
 function copyFixture() {
@@ -23,7 +27,7 @@ function copyFixture() {
 }
 
 function runCli(script, args, cwd) {
-  return spawnSync(process.execPath, [path.join(HERE, script), ...args], {
+  return spawnSync(process.execPath, [path.join(SCRIPTS, script), ...args], {
     cwd,
     encoding: 'utf8',
   })
