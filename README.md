@@ -80,22 +80,56 @@ generator 是 fail-closed：canonical input 缺失、无法解析、source 指�
 
 ## 仓库结构
 
+文档 —— 人读的入口，也是若干规范句的 canonical 文本：
+
 - [`SKILL.md`](./SKILL.md)：轻量/完整模式、三条不变量、A–F 状态机与 router。
 - [`INTERVIEW.md`](./INTERVIEW.md)：证据抽取、source 资格、unresolved 与 decision 的边界。
 - [`DISCIPLINES.md`](./DISCIPLINES.md)：Canonical Agent Entry Contract 与平台 adapter 两区制。
 - [`SCHEMA.md`](./SCHEMA.md)：持久化协议、canonical schema、bundle/manifest、config 与 audit。
 - [`templates/`](./templates/)：lightweight、L0–L3 与 contract scaffolds。
 - [`control-plane/`](./control-plane/)：V2/V2.5 projection、Lease、authority blocker 与 protected effect 纵切。
-- [`scripts/`](./scripts/)：guard、migration、checker/fixer、generator、consumer verifier 和测试夹具。
+
+代码 —— 分层，方向由 `npm run arch` 每次强制：
+
+- [`src/`](./src/)：库代码。`shared/`（与产品层无关的叶子：文本、glob、遍历、canonical JSON、原子写、argv、版本策略）、`truth/`（V1 的字典、模型、schema 规则、ID 引用、投影、两区制、诊断）、`truth/cli/`（argv 解析与输出渲染；它**返回** exit code，不自己 exit）。
+- [`src/layers.mjs`](./src/layers.mjs)：allowed-edge 的声明式清单。未归类的文件是违规，不是默认放行。
+- [`scripts/`](./scripts/)：CLI 入口、V2 daemon、检查与报告工具，以及 `fixtures/v1-vertical-slice/` —— 纵切集成测试 spawn 的那棵夹具，它跟随 HEAD，与冻结的 [`fixtures/`](./fixtures/) 是两回事。`check-spec-suite.mjs` 是 facade：逐名 re-export `src/` 的公开面并持有 CLI guard，所以既有的 import 路径与 flag 都没变。库代码一律返回值或抛异常，**进程退出码只在这一层决定**。
+- [`registry/invariants.mjs`](./registry/invariants.mjs)：规则的机器可读单一真相源。`CHECK_NAMES` 与可生成的文档表格都从它派生，每条记录必填「这条规则**没有**证明什么」。
+- [`migrations/`](./migrations/)：schema migration registry，**目前真的是空的**。所有 artifact 都还是 `schemaVersion: 1`；凭空造一个 v2 格式等于发明未知事实。未注册的 `(kind, from→to)` 一律 unsupported 并 fail closed。
+
+语料与测试：
+
+- [`fixtures/`](./fixtures/)：冻结语料，被整树 digest 锁住 —— 改任何一个字节都会让测试变红，这是设计目标。目录名是**产品层**（`v1`/`v2`），文件里的 `schemaVersion` 才是版本；`schema-unsupported/` 字面写着 `99`，用来证明 fail-closed 不是靠测试临时改写版本号得到的。
+- [`tests/`](./tests/)：`unit`（按模块）、`integration`（两条纵切）、`compatibility`（旧 schema、幂等迁移、未知版本、冻结树锁）、`golden`（字节精确）、`adversarial`（V2 攻击面）。
 
 ## 验证
 
 ```bash
 npm install
-npm test
+npm test                              # 全量测试
+npm run arch                          # 静态架构约束
+npm run docs -- --check               # 文档生成区与 registry 的漂移检查
+npm run trust-report -- --format md   # 每条规则「没有证明什么」（也可 json）
 ```
 
 测试覆盖幂等迁移、重复任务保持 unresolved、adapter 手写区保护、确定性生成、三类 V1 fail-closed 路径、consumer 副本校验，以及 V2 的 trust-root 注入、self-authorization、Lease tampering/replay/expiry/revocation、G-17 bypass、protected/baseline overlap、symlink escape、classifier/audit failure 和 denial provenance。
+
+`npm run arch` 强制四件事：import 图无环；每条跨层边符合 `src/layers.mjs` 的声明；每个 `.mjs` 都有归属层（未归类 = 违规）；**没有绕过 import 图的动态加载**。第四条堵的是前三条共同的前提 —— 静态扫描看不见 `import(expr)` 与 `createRequire()`，所以在加上它之前，任何被层策略禁止的边只要改写成动态形式就能全程绿灯通过。字面量 `import('./x.mjs')` 被收成图里的真实边照常受约束；无法静态分析的形态默认违规，只有 `DYNAMIC_LOAD_EXEMPTIONS` 里按 `(文件, 形态)` 登记的放行，而**用不上的豁免同样是违规** —— 这样检测器若无声失效，豁免会一起变红而不是安静全绿。
+
+在 Windows 上有 3 个 POSIX 隔离测试会因缺能力而**跳过**并打印所需能力。CI 上 `SPEC_SUITE_REQUIRE_POSIX_ISOLATION=1` 让同样的缺失变成硬失败：跳过的安全测试不该被记成通过。CI 矩阵是 ubuntu-latest × node 22/24，`fail-fast` 关闭，这样"到处都坏"与"只在某个版本坏"能被区分开。
+
+## 信任边界
+
+本仓库最想拦住的误读是把「机器检查通过」当成「语义真相已证明」。为了让这一步没法默认发生，每条规则在 [`registry/invariants.mjs`](./registry/invariants.mjs) 里都被归入四类之一，并且**必填**一行「这条规则没有证明什么」：
+
+| 分类 | 含义 | 例子 |
+| --- | --- | --- |
+| `machine-enforced` | 有检查每次运行都验证，违规必然被拦 | 派生物逐字节可复现；`source` 恰好指向一个可解析的权威 ID；Lease 的 Ed25519 签名 |
+| `trusted-assertion` | 工具接受但不验证内容，绿灯 ≠ 已证明 | source 指向的文档是否**真的**规定了该事实；`complete: true` |
+| `external-assumption` | 依赖工具之外的东西成立 | POSIX identity 与 mode bit 隔离；enforcer 是受保护 effect 的唯一出口；supervisor 配置正确 |
+| `not-proven` | 已知没人验证，登记在案而不假装已覆盖 | config 的未知键被静默忽略；audit 没有 append-only 保证；`keyId` 与公钥之间没有绑定 |
+
+上表的例子是举例，完整清单由 `npm run trust-report` 输出 —— 那份报告的全部目的就是让这句话有具体内容，而不只是一句免责声明。最典型的一对：checker 能证明 `source: BR-REFUND-001` 这个 ID 可解析，却**读不懂**那份文档是否规定了该数字。前者 machine-enforced，后者 trusted-assertion；混为一谈就会把「出处可解析」记成「事实正确」。
 
 ## 设计边界
 
