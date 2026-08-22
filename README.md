@@ -106,3 +106,4 @@ npm test
 - Action SHA pinning 属于 hardening，不冒充 V1 correctness。
 - Context projection 只增加知识，不授予权限；dependency uncertainty 增加时 privilege 只能保持或下降。
 - `complete: true` 是受信声明；同步修改 graph 与 digest 不等于证明依赖图语义完备。
+- Control Plane effect 类型暂停扩大；现有 3 类之外不加新类，直到授权判定从三处手写的 per-kind if 链变成数据驱动。

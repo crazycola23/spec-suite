@@ -66,6 +66,29 @@ Enforcer IPC 只接受 `schemaVersion`、`op: executeEffect`、`effect` 和 `lea
 
 部署仍必须让 enforcer adapter 成为受保护写入/网络 effect 的唯一出口。此纵切验证 POSIX identity 和 mode-bit 隔离前提，不替代容器、MAC policy、ACL/capability 审计或可信时间源。
 
+## effect 类型暂停扩大
+
+Control Plane effect 类型暂停扩大：现有 3 类（`file.write`、`network.mock.protected`、`network.mock.live-stripe`）之外不加新类。
+
+理由不是"以后也不加"，而是**现在加的代价是隐性的**。授权判定目前是 per-kind 的 if 链，同一个 kind 分散在三处手写分支，谁都不保证它们同步：
+
+| 位置 | 每个 kind 在这里手写什么 | 只改这一处的后果 |
+|---|---|---|
+| `classifyEffect` | resource 归一化、`protected` 布尔、protection 三元组 | 新 kind 落不进任何分支 → `effect kind is not classified`（fail closed，但要到分类那一刻才炸） |
+| `executeAuthorizedEffect` | 真正的副作用怎么做 | 只在这边加 = 死代码，读的人却以为该 kind 已被支持 |
+| `baselineAuthorizes` | 是否可以免 lease | 顺手放宽 = 一条 `resourcePrefix` 意外授权一整类全新副作用 |
+
+最要紧的一处不对称在第一格：`file.write` 的 `protected` 是**从 policy 的 protected 前缀推导**出来的（命中多于一条按歧义拒绝），而两个 mock kind 是**硬编码** `protected: true` 并连 protection 三元组一起写死。两个先例互相矛盾，于是"第四类的 `protected` 从哪来"没有唯一答案 —— 而写错的方向只差一个键：硬编码成 `protected: false` 的新 kind 会全程绿灯地绕过整条授权链。
+
+解除条件（四条全部满足才考虑加第四类）：
+
+1. 授权判定改成**数据驱动**：某个 kind 的 protected 来源、执行方式、能否被 baseline 免检，由一张声明表决定，而不是三条 if 链各写一遍。
+2. 新 kind 默认落在"必须持 lease"一侧。`baselineAuthorizes` 现在硬编码只认 `file.write`，这个方向不能反过来。
+3. 有对抗性测试证明该 kind 在 unauthorized、over-authorizing lease、cross-task replay 三种形状下都被拒。
+4. 该 effect 的真实副作用在纵切里可被隔离 —— 现有 3 类全部是 mock 或 workspace 内写入，不触达外部世界。
+
+机器侧现状：`kind` 集合恰好是这 3 个、分类链与执行链集合相等、`baselineAuthorizes` 只认 `file.write`，这三件事由 `tests/adversarial/v2-control-plane.test.mjs` 的源码普查在每次 `npm test` 时核对。这些锁**不能**阻止新增 —— 改断言与改 if 链可以在同一个 commit 里完成。它们买到的是"不可能悄悄发生"：新增一类必然在 diff 里撞上一条写着上面这些条件的测试。
+
 ## Projection 的准确边界
 
 依赖图 digest 不匹配、图声明不完整、root/edge/surface 无法解析或 canonical input 漂移时，projector 会把 context 扩到全图，同时输出 `leaseEligible: false` 和 `privilegeCeiling: none`。这验证的是 **declared incompleteness 与 graph drift detection**。

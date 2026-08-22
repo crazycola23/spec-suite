@@ -193,9 +193,11 @@ export const INVARIANTS = [
     schemaVersions: [1],
     enforcement: ENFORCEMENT.MACHINE,
     checks: [4],
-    residualRisk: '证明的是「同一棵树、同一台机器上重复运行得到相同字节」。跨 Node 版本、locale、'
-      + '文件系统大小写敏感性的可复现性没有被验证 —— CI 只有 ubuntu-latest + node 20 一个组合'
-      + '（.github/workflows/test.yml）。本机 Windows 上另有 3 个环境相关失败。',
+    residualRisk: '证明的是「同一棵树上重复运行得到相同字节」。CI 矩阵跑 node 22 与 24'
+      + '（.github/workflows/test.yml），所以"跨 Node 大版本字节一致"这一条现在确实被验证了。'
+      + '仍未验证的是跨 OS、locale 与文件系统大小写敏感性 —— 矩阵只有 ubuntu-latest 一种运行环境，'
+      + '而唯一跑过的非 Linux 机器（Windows）上有 3 个 POSIX 隔离测试因缺能力而跳过，'
+      + '连"该平台能跑完整测试"都还没成立。',
     docRefs: ['SKILL.md §2', 'SCHEMA.md §5'],
   },
 
@@ -491,6 +493,26 @@ export const INVARIANTS = [
       + '（v2-control-plane.test.mjs:541-558：删掉一条真实 edge、同步更新 digest 后，'
       + '`uncertainty.increased` 仍是 false、`leaseEligible` 仍是 true，一个 permission 静默消失）。',
     docRefs: ['README.md 设计边界', 'control-plane/README.md Projection 的准确边界'],
+  },
+  {
+    id: 'BND-EFFECT-MORATORIUM',
+    kind: 'boundary',
+    title: 'Control Plane effect 类型暂停扩大',
+    statement: 'Control Plane effect 类型暂停扩大；现有 3 类之外不加新类，直到授权判定从三处手写的 per-kind if 链变成数据驱动。',
+    severity: 'error',
+    schemaVersions: [1],
+    schemaKind: 'control-plane-document',
+    enforcement: ENFORCEMENT.MACHINE,
+    checks: [],
+    // 由 v2-control-plane.test.mjs 的源码普查强制（三重锁：kind 集合恰好 3 个、
+    // 分类链与执行链集合相等、只有 file.write 能免 lease）。不属于 V1 七类检查。
+    evidence: ['scripts/enforce-effect.mjs', 'tests/adversarial/v2-control-plane.test.mjs'],
+    residualRisk: '两处限制。其一，普查只认三个具名函数里的 `kind === \'…\'` 字面量：'
+      + '若有人按 kind 之外的字段（例如 resource 前缀）另开一条授权分支，kind 集合看起来没变，'
+      + '普查不会发现。其二，解除条件（授权判定数据驱动、新 kind 默认落在"必须持 lease"一侧、'
+      + '三种对抗形状下均被拒、真实副作用可隔离）**没有任何机器强制** —— 改断言与改 if 链'
+      + '可以在同一个 commit 里完成。这些锁买到的是"不可能悄悄发生"，不是"不可能发生"。',
+    docRefs: ['README.md 设计边界', 'control-plane/README.md effect 类型暂停扩大'],
   },
 
   // ---- V2 控制面的机器强制点（control-plane/README.md）-----------------
