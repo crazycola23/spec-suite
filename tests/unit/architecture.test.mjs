@@ -5,7 +5,18 @@ import path from 'node:path'
 import test from 'node:test'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { blankComments, buildImportGraph, checkArchitecture, checkLayers, findCycles, staticSpecifiers } from '../../scripts/check-architecture.mjs'
+import {
+  DYNAMIC_LOAD_EXEMPTIONS,
+  blankComments,
+  buildImportGraph,
+  checkArchitecture,
+  checkDynamicLoads,
+  checkLayers,
+  dynamicLoads,
+  findCycles,
+  maskLiterals,
+  staticSpecifiers,
+} from '../../scripts/check-architecture.mjs'
 import { loadAuthorityRecords } from '../../scripts/control-plane-common.mjs'
 import { layerOf } from '../../src/layers.mjs'
 
@@ -350,6 +361,162 @@ test('tests/ 下每个测试文件都落在 npm test 的 glob 够得着的深度
     + `${unreachable.join('\n')}\n`
     + '要么把文件挪到 tests/<分类>/ 下（恰好一层），要么改 pattern 并更新上面那条断言。\n'
     + '不要只改文件位置就走 —— 漏跑不会报错，只会让摘要里少几条。',
+  )
+})
+
+// ---------------------------------------------------------------------------
+// 动态加载：不许有绕过 import 图的后门
+// ---------------------------------------------------------------------------
+//
+// 上面所有关于「边」「环」「层」的断言都建立在同一个前提上：import 图是完整的。
+// 而静态扫描看不见 `import(expr)` 与 `createRequire()`。在封住之前，任何一条
+// 被层策略禁止的边只要改写成动态形式就能整体绕过检查，`npm run arch` 照旧 0 违规。
+//
+// 这一组测试分两类：一类证明检测器认得出四种形态（否则"0 违规"是空过），
+// 一类证明它**不**误报字符串里的 require( —— 那两处是被 spawn 的子进程源码。
+//
+// 注意本文件自己的自指陷阱：下面的合成源码全部放在字符串 / 模板字面量里。
+// 这既是必须的（否则 check-architecture 会把这个测试文件自己判成违规），
+// 也正好是被测行为本身 —— 字符串里的加载语法不是本文件的边。
+
+test('maskLiterals：抹掉字符串内容、不被正则字面量带偏、保留模板插值', () => {
+  // 逐字钉住掩码结果，而不是断言"不含某个形状"。后者很容易自己写错：
+  // `/"[^"]*require/` 看着像"引号里有 require"，但 `[^"]*` 会跨过换行，于是从
+  // **闭**引号一直匹配到下一行的真 require —— 断言在正确的输出上失败。
+  const cases = [
+    // 字符串里的 require( 必须消失（否则误报），字符串外的必须留下（否则漏报）。
+    {
+      src: 'const s = "require(\'node:fs\')"\nrequire(1)\n',
+      masked: 'const s = "SSSSSSSSSSSSSSSSSS"\nrequire(1)\n',
+      why: '字符串内容没被抹掉，或把字符串外的真 require( 一起抹了',
+    },
+    // 正则字面量里的引号**交错**出现，是最容易把扫描器带偏的形状：一旦 `'` 被
+    // 当成开串，后面的 `"` 会开出一个跨行假字符串，把真代码一起抹掉（漏报）。
+    // 这正是 check-architecture.mjs 自己源码里的形状。
+    {
+      src: 'const re = /([\'"])([^\'"]+)\\1/g\nrequire(2)\n',
+      masked: 'const re = /SSSSSSSSSSSSSSSS/g\nrequire(2)\n',
+      why: '正则字面量把扫描器带偏了 —— 后面的真 require( 被假字符串吃掉',
+    },
+    // 模板插值里是真代码，抹掉就等于给动态加载留藏身处。
+    {
+      src: 'const t = `x${require(3)}y`\n',
+      masked: 'const t = `S${require(3)}S`\n',
+      why: '${…} 里的代码被抹掉了',
+    },
+  ]
+  for (const { src, masked, why } of cases) {
+    const r = maskLiterals(src)
+    assert.equal(r.unterminated, false, `状态栈没闭合：${JSON.stringify(src)}`)
+    assert.equal(r.masked, masked, why)
+    // 长度守恒是行号换算与"从原文同区间取回 specifier"两件事的前提。
+    assert.equal(r.masked.length, src.length, '掩码改变了长度')
+  }
+
+  // 反过来：真的没闭合时必须报出来，不能拿着可能错的结果继续。
+  assert.equal(maskLiterals('const s = "no end\n').unterminated, true)
+})
+
+test('dynamicLoads 区分字面量与计算式 import，并定位行号', () => {
+  const src = [
+    'await import(\'./sibling.mjs\')',
+    'await import(computed)',
+    'const req = createRequire(x)',
+    'require(\'node:fs\')',
+  ].join('\n') + '\n'
+  const loads = dynamicLoads(src)
+  assert.equal(loads.unterminated, false)
+  assert.deepEqual(loads.literalImports, [{ spec: './sibling.mjs', line: 1 }])
+  assert.deepEqual(loads.computedImports, [2], '计算式 import 没被认出来，或把字面量那条也算进去了')
+  assert.deepEqual(loads.createRequires, [3])
+  assert.deepEqual(loads.requireCalls, [4])
+
+  // `import.meta` 与属性访问不是动态 import。
+  const notLoads = dynamicLoads('const u = import.meta.url\nobj.import(1)\nmyRequire(2)\n')
+  assert.deepEqual(notLoads.computedImports, [])
+  assert.deepEqual(notLoads.literalImports, [])
+  assert.deepEqual(notLoads.requireCalls, [], 'myRequire( 被当成了 require(')
+})
+
+test('不误报字符串里的 require( —— 那是被 spawn 的子进程源码', () => {
+  const target = 'tests/adversarial/v2-control-plane.test.mjs'
+  const src = fs.readFileSync(path.join(repoRoot, target), 'utf8')
+  // 非空性守卫：原文必须真的含这个形状，否则这条锁什么都没量。
+  assert.match(
+    src, /['"]require\('node:fs'\)/,
+    `${target} 里已经没有字符串内的 require( 了 —— 这条锁正在空过，请删掉它或换一个语料`,
+  )
+  const loads = dynamicLoads(src)
+  assert.deepEqual(
+    loads.requireCalls, [],
+    `${target} 里字符串内的 require( 被当成了真实调用。它是传给 node -e 的子进程源码，\n`
+    + '不是本文件的模块边。误报会逼人给这个文件开一条不该有的豁免。',
+  )
+})
+
+test('字面量动态 import 会变成图里的真实边，因此照样受层策略约束', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-dyn-'))
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  // 只有动态形式的一条边：静态扫描看不见它，这条断言量的就是"现在看得见了"。
+  fs.writeFileSync(path.join(root, 'src', 'a.mjs'), 'export const go = async () => await import(\'./b.mjs\')\n', 'utf8')
+  fs.writeFileSync(path.join(root, 'src', 'b.mjs'), 'export const b = 1\n', 'utf8')
+
+  const { graph, problems } = buildImportGraph(root, ['src'])
+  assert.deepEqual(problems, [])
+  assert.deepEqual(graph.get('src/a.mjs'), ['src/b.mjs'], '字面量动态 import 没进图 —— 层策略与环检测都看不见它')
+
+  // 解析不到的动态 specifier 与静态的一样按违规处理，不静默忽略。
+  fs.writeFileSync(path.join(root, 'src', 'a.mjs'), 'await import(\'./nope.mjs\')\n', 'utf8')
+  const broken = buildImportGraph(root, ['src'])
+  assert.equal(broken.problems.length, 1, '动态 import 指向不存在的文件时应报违规')
+  assert.match(broken.problems[0], /nope\.mjs/)
+})
+
+test('绕过检测不是空过：三类不可分析形态都必须被抓到', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-dyn-'))
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.writeFileSync(
+    path.join(root, 'src', 'x.mjs'),
+    ['await import(computed)', 'require(\'node:fs\')', 'createRequire(u)'].join('\n') + '\n',
+    'utf8',
+  )
+  const { violations, detected } = checkDynamicLoads(root, ['src'])
+  assert.deepEqual(
+    detected.map((d) => d.form).sort(),
+    ['computed-import', 'createRequire', 'require'],
+  )
+  // 这个合成仓库里没有任何被豁免的文件，所以三处都该报违规。
+  const flagged = violations.filter((v) => v.includes('src/x.mjs'))
+  assert.equal(flagged.length, 3, `三类形态应各报一条，实得 ${flagged.length}：\n${flagged.join('\n')}`)
+  for (const v of flagged) assert.match(v, /DYNAMIC_LOAD_EXEMPTIONS/, '违规文案要指明怎么登记豁免')
+})
+
+// 这条是整套动态加载检查的**非空过保险**，也是它与普通 allowlist 的区别所在：
+// 用不上的豁免同样是违规。若哪天扫描器坏掉、一个形态都认不出来，两条豁免会
+// 一起变成"未使用"而报错 —— 而不是安静地全绿。所以下面同时锁两头：名单本身
+// 不许悄悄变长，且每一条都必须真的在用。
+test('动态加载豁免名单：不许悄悄变长，也不许留着用不上的条目', () => {
+  assert.deepEqual(
+    DYNAMIC_LOAD_EXEMPTIONS.map((e) => ({ file: e.file, forms: e.forms })),
+    [
+      { file: 'src/truth/config/yaml.mjs', forms: ['createRequire'] },
+      { file: 'tests/unit/argv.test.mjs', forms: ['computed-import'] },
+    ],
+    '豁免名单变了。新增一条意味着又多一处绕过 import 图的加载 —— 这需要是一次\n'
+    + '可见的决定，而不是顺手加完就绿。若确实必要，连带更新这条断言并写清 reason。',
+  )
+  for (const e of DYNAMIC_LOAD_EXEMPTIONS) {
+    assert.ok(e.reason && e.reason.length > 40, `${e.file} 的豁免缺少足够的 reason`)
+  }
+
+  // 每条豁免都必须命中真实源码。checkArchitecture 里"用不上的豁免 = 违规"那条
+  // 规则会让这件事变红；这里再从正面钉一次，把「恰好是这三处」写下来。
+  const r = checkArchitecture(repoRoot)
+  assert.deepEqual(r.violations, [], `架构违规：\n${r.violations.join('\n')}`)
+  assert.deepEqual(
+    [...new Set(r.dynamicLoads.map((d) => `${d.file}#${d.form}`))].sort(),
+    ['src/truth/config/yaml.mjs#createRequire', 'tests/unit/argv.test.mjs#computed-import'],
+    '仓库里绕过 import 图的加载点集合变了 —— 要么多了一处，要么检测器不再认得旧的那处。',
   )
 })
 
