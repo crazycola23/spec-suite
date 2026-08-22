@@ -17,18 +17,19 @@ lightweight unresolved
         v
        G-*
 
-canonical agent entry        canonical contracts
-        |                            |
-        v                            v
-CLAUDE.md generated region   contract-bundle.json + manifest.json
-        |                            |
-        +----------- checked --------+
-                                     |
-                                     v
-                           verified consumer copy
+canonical agent entry             canonical contracts
+        |                                 |
+  +-----+-----+                           v
+  v           v              contract-bundle.json + manifest.json
+CLAUDE.md   AGENTS.md                     |
+  |           |                           |
+  +-----+-----+----------- checked -------+
+                                            |
+                                            v
+                                  verified consumer copy
 ```
 
-V1 特意只证明边界和确定性：一个真实 Claude adapter、一个语言无关 JSON bundle、一个按 manifest / 文件集合 / 字节工作的 consumer verifier。它不提前承诺多语言代码生成、SemVer 兼容、`specHash` 或 breaking-change 语义。
+V1 特意只证明边界和确定性：Claude/Codex 两个真实 adapter、一个语言无关 JSON bundle、一个按 manifest / 文件集合 / 字节工作的 consumer verifier。两个 adapter 的共同区来自同一份 canonical Agent Entry Contract；checker 会逐个验证声明文件存在、marker 唯一且内容逐字节一致。它不提前承诺多语言代码生成、SemVer 兼容、`specHash` 或 breaking-change 语义。
 
 ## V2/V2.5 control-plane 纵切
 
@@ -84,7 +85,7 @@ generator 是 fail-closed：canonical input 缺失、无法解析、source 指�
 
 - [`SKILL.md`](./SKILL.md)：轻量/完整模式、三条不变量、A–F 状态机与 router。
 - [`INTERVIEW.md`](./INTERVIEW.md)：证据抽取、source 资格、unresolved 与 decision 的边界。
-- [`DISCIPLINES.md`](./DISCIPLINES.md)：Canonical Agent Entry Contract 与平台 adapter 两区制。
+- [`DISCIPLINES.md`](./DISCIPLINES.md)：Canonical Agent Entry Contract、Claude/Codex adapter 与两区制。
 - [`SCHEMA.md`](./SCHEMA.md)：持久化协议、canonical schema、bundle/manifest、config 与 audit。
 - [`templates/`](./templates/)：lightweight、L0–L3 与 contract scaffolds。
 - [`control-plane/`](./control-plane/)：V2/V2.5 projection、Lease、authority blocker 与 protected effect 纵切。
@@ -112,7 +113,7 @@ npm run docs -- --check               # 文档生成区与 registry 的漂移检
 npm run trust-report -- --format md   # 每条规则「没有证明什么」（也可 json）
 ```
 
-测试覆盖幂等迁移、重复任务保持 unresolved、adapter 手写区保护、确定性生成、三类 V1 fail-closed 路径、consumer 副本校验，以及 V2 的 trust-root 注入、self-authorization、Lease tampering/replay/expiry/revocation、G-17 bypass、protected/baseline overlap、symlink escape、classifier/audit failure 和 denial provenance。
+测试覆盖幂等迁移、重复任务保持 unresolved、双 adapter 同源投影、声明路径 fail-closed、平台手写区保护、确定性生成、三类 V1 fail-closed 路径、consumer 副本校验，以及 V2 的 trust-root 注入、self-authorization、Lease tampering/replay/expiry/revocation、G-17 bypass、protected/baseline overlap、symlink escape、classifier/audit failure 和 denial provenance。
 
 `npm run arch` 强制四件事：import 图无环；每条跨层边符合 `src/layers.mjs` 的声明；每个 `.mjs` 都有归属层（未归类 = 违规）；**没有绕过 import 图的动态加载**。第四条堵的是前三条共同的前提 —— 静态扫描看不见 `import(expr)` 与 `createRequire()`，所以在加上它之前，任何被层策略禁止的边只要改写成动态形式就能全程绿灯通过。字面量 `import('./x.mjs')` 被收成图里的真实边照常受约束；无法静态分析的形态默认违规，只有 `DYNAMIC_LOAD_EXEMPTIONS` 里按 `(文件, 形态)` 登记的放行，而**用不上的豁免同样是违规** —— 这样检测器若无声失效，豁免会一起变红而不是安静全绿。
 

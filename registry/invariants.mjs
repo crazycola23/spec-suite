@@ -75,7 +75,7 @@ export const CHECKS = [
   {
     id: 4,
     name: '两区制比对',
-    errorMeaning: 'canonical 与 Markdown 投影不一致',
+    errorMeaning: '声明的 adapter 缺失/无唯一生成区，或 canonical 与 Markdown 投影不一致',
     modules: ['src/truth/adapters/zones.mjs'],
   },
   {

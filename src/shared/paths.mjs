@@ -13,6 +13,10 @@
 //   | `control-plane-trust.mjs:27`           | 内联      | **在内 ⇒ 抛错** |
 //   | `lease-issuer.mjs:70`                  | 内联      | **在内 ⇒ 抛错** |
 //
+// 后续 `src/truth/adapters/zones.mjs` 也复用这一谓词，保证 config 声明的
+// `AGENTS.md` / `CLAUDE.md` adapter 路径不能逃出 specs root；它不是上表
+// “合并前重复实现”的一员，而是合并后新增的第 7 个 importer。
+//
 // 最后两行是这次合并最值得做的理由：仓库同时依赖这个判定的**两个方向** ——
 // 「不许逃出规格库」与「必须落在 agent workspace 之外」。它们过去是两份各自
 // 抄写的实现，而一旦抄歪，两个方向会**不对称地**失效：一边仍然拦得住，另一边

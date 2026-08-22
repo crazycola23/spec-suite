@@ -1,6 +1,6 @@
 <!-- 模板：拷贝到规格库根目录后替换所有 <尖括号> 占位符。
      README 是给**人**看的落地页，Agent Entry Contract 是共同纪律真相源，
-     CLAUDE.md 是其中一个平台 adapter。
+     CLAUDE.md 与 AGENTS.md 是两个平台 adapter。
      未关闭缺口清单一律不在本文重复 —— 只指向 decisions/gaps.md。
      （这两条就是本套件的铁律 4：有唯一台账的东西，别处只许引用文件名。） -->
 
@@ -8,7 +8,7 @@
 
 <一句话说明这个库是什么。例：GEO 平台的业务规则、机器可读契约与页面规格的唯一来源。代码不在本库。>
 
-**开工前先读当前平台的根入口文件**（本模板先提供 [CLAUDE.md](./CLAUDE.md)）。共同纪律来自 `contracts/agent-entry.yaml`；不要在 adapter 里手抄修改。
+**开工前先读当前平台的根入口文件**（Claude 用 [CLAUDE.md](./CLAUDE.md)，Codex 用 [AGENTS.md](./AGENTS.md)）。共同纪律来自 `contracts/agent-entry.yaml`；不要在 adapter 里手抄修改。
 
 ---
 
@@ -18,6 +18,7 @@
 <项目代号>/                        ← 不写绝对路径。任何位置的克隆都成立
 ├─ README.md                      ← 本文
 ├─ CLAUDE.md                      ← Claude adapter：共同生成区 + 平台手写区
+├─ AGENTS.md                      ← Codex adapter：同一共同生成区 + 平台手写区
 ├─ .spec-suite/unresolved.yaml    ← 轻量未知迁移进完整 suite 前的持久化状态
 ├─ <10-why/>                      ← 参考层（为什么）
 │   └─ <02-业务规则说明.md>        ★ 唯一业务真相源

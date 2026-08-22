@@ -179,7 +179,7 @@ adapter 用两区制：
 - 共同纪律在区内，平台特有内容在区外；
 - canonical 变化必须重渲染，adapter 手写变化不得改共同区。
 
-V1 只提供 `agent-entry.common` → `agentEntryCommon` 和一个 Claude adapter。新增 AGENTS/GEMINI/Copilot 是 adapter 扩展，不是新增真相源。模板见 `templates/L0/agent-entry.yaml` 与 `templates/L0/CLAUDE.md`。
+V1 提供 `agent-entry.common` → `agentEntryCommon`，并把同一投影写入 Claude 的 `CLAUDE.md` 与 Codex 的 `AGENTS.md`。新增 Gemini/Copilot 仍是 adapter 扩展，不是新增真相源。模板见 `templates/L0/agent-entry.yaml`、`templates/L0/CLAUDE.md` 与 `templates/L0/AGENTS.md`。
 
 其他 Markdown 投影沿用同一标记，例如 `stateMachines.PublishRecord.transitions`。
 
@@ -238,7 +238,8 @@ expected bytes     == consumer bytes
   "agentEntry": {
     "source": "contracts/agent-entry.yaml",
     "adapters": [
-      { "platform": "claude", "path": "CLAUDE.md", "projection": "agent-entry.common" }
+      { "platform": "claude", "path": "CLAUDE.md", "projection": "agent-entry.common" },
+      { "platform": "codex", "path": "AGENTS.md", "projection": "agent-entry.common" }
     ]
   },
   "bundle": {
@@ -269,6 +270,8 @@ expected bytes     == consumer bytes
 字段约束：
 
 - `idNamespaces[].pattern` 必须 `^...$` 完全锚定且互斥。
+- `agentEntry.adapters[]` 的 `platform`、`path`、`projection` 都必须是非空字符串；只要注册了 `agent-entry.common`，数组就不得为空。`path` 必须是 specs root 内的相对 Markdown 路径且不能重复，文件必须存在并恰好包含一次使用 `agentEntryCommon` renderer 的 projection。每个 adapter 单独验证，不能由另一个文件代替。
+- `claudeMd` 只保留为旧配置在 `agentEntry.adapters` 为空时的禁令覆盖入口；新配置以 `agentEntry.adapters` 为准。
 - `mayLackDefinition: true` 只标“已引用、尚无定义文件”的合法未决命名空间；generator 不接受它作为 source。
 - `excludeFromScan` 包含 generated、依赖目录和无裁决权的只读原型。
 - `coverageRequirements` 声明某命名空间必须进入指定矩阵；空数组 no-op。
@@ -301,7 +304,7 @@ checker 七类检查（下表由 `registry/invariants.mjs` 生成，`node script
 | 1 | schema 符合性 | 记录形状、必填 source、占位符或 Agent Entry Contract 无效 |
 | 2 | 状态机闭合 | 出边悬空，或 terminal 与 transitions 矛盾 |
 | 3 | ID 引用完整性 | source/引用没有定义，或命名空间有歧义 |
-| 4 | 两区制比对 | canonical 与 Markdown 投影不一致 |
+| 4 | 两区制比对 | 声明的 adapter 缺失/无唯一生成区，或 canonical 与 Markdown 投影不一致 |
 | 5 | N-xx 禁令覆盖 | 禁令没有可信三态断言行 |
 | 6 | 禁止复制中文标签 | 结构化字段完整复制 canonical label |
 | 7 | 覆盖矩阵完整性 | 配置要求的 ID 没出现在指定文件 |

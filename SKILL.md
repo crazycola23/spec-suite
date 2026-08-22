@@ -55,7 +55,7 @@ Start at L0 and add only the layer whose trigger exists.
 
 | Level | Add | Trigger |
 |---|---|---|
-| L0 | canonical entry, one adapter, dictionary, gaps, checker, bundle generator, CI | any full-mode condition |
+| L0 | canonical entry, declared platform adapters, dictionary, gaps, checker, bundle generator, CI | any full-mode condition |
 | L1 | conventions, errors, permissions, decision sheets, consumer stubs | money, permissions, third-party nondeterminism, or product decisions |
 | L2 | screens, modals, traceability, delivery slices | frontend/backend parallel delivery |
 | L3 | progress ledger, provider baseline, legacy deprecation | long-running or legacy migration work |
@@ -67,7 +67,7 @@ Contract scaffolds are independent of level. Route to `templates/contracts/` onl
 ```text
 A  Extract evidence and unresolved facts       -> INTERVIEW.md
 B  Freeze only source-backed dictionary facts  -> unresolved choices stay unresolved
-C  Render canonical agent entry + install checker/fixer + CI
+C  Render canonical agent entry into declared platform adapters + install checker/fixer + CI
 D  Close only decisions that block the next irreversible boundary
 E  Add DDL/API fixtures and generate the neutral bundle
 F  Add L2 screens/traceability/slices when triggered

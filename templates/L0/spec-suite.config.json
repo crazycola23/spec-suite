@@ -7,7 +7,8 @@
   "agentEntry": {
     "source": "contracts/agent-entry.yaml",
     "adapters": [
-      { "platform": "claude", "path": "CLAUDE.md", "projection": "agent-entry.common" }
+      { "platform": "claude", "path": "CLAUDE.md", "projection": "agent-entry.common" },
+      { "platform": "codex", "path": "AGENTS.md", "projection": "agent-entry.common" }
     ]
   },
   "bundle": {

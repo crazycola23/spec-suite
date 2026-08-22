@@ -38,6 +38,25 @@ V1 的 Claude adapter：
 
 相对路径是部署配置，不是权威 source；CI 中也应通过 checkout 布局或显式参数提供。若消费仓库无法访问规格仓库，CI 应从可信 artifact 恢复同一份 generated bundle，而不是复制业务描述。
 
+V1 的 Codex adapter 使用同一共同区，只替换宿主文件与平台手写区：
+
+```markdown
+# <consumer-repository> · Codex adapter
+
+<!-- BEGIN GENERATED: agent-entry.common -->
+<从规格库 canonical Agent Entry Contract 渲染>
+<!-- END GENERATED: agent-entry.common -->
+
+## Codex-specific handwritten region
+
+- 规格库位置：`<相对路径，例如 ../project-specs>`
+- 本仓库 contract copy：`<本地目录>`
+- 本仓库专属验证命令：`<命令>`
+- 若存在更深层 `AGENTS.md`，只放该目录专属规则，不复制共同区
+```
+
+Codex 从项目根向当前工作目录逐层加载 `AGENTS.md`，更靠近工作目录的指令后加载并覆盖上层；因此 canonical 共同区通常只放根 adapter，目录级文件保持局部。平台发现规则见 [OpenAI 官方 AGENTS.md 文档](https://developers.openai.com/codex/agent-configuration/agents-md)。
+
 ## 2. 本地约定只写平台特有内容
 
 adapter 手写区可以包含：

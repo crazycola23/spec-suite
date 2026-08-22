@@ -2,7 +2,8 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { readText } from '../../shared/text.mjs'
+import { isInside } from '../../shared/paths.mjs'
+import { readText, toPosix } from '../../shared/text.mjs'
 import { matchesAny } from '../../shared/glob.mjs'
 import { walkFiles } from '../../shared/walk.mjs'
 import { RENDERERS } from '../projections/renderers.mjs'
@@ -47,6 +48,7 @@ export function planZones({ specsRoot, config, model, col, write = false }) {
     (r) => matchesAny(r, config.markdownGlobs) && !matchesAny(r, config.excludeFromScan))
 
   const seen = new Set()
+  const zonesByFile = new Map()
   const ratios = []
   const plan = []
   let zoneCount = 0
@@ -58,6 +60,7 @@ export function planZones({ specsRoot, config, model, col, write = false }) {
     const text = readText(abs)
     const lines = text.split(/\r?\n/)
     const zones = findZones(lines, { file: rel, col })
+    zonesByFile.set(rel, zones)
     if (zones.length === 0) {
       ratios.push({ file: rel, total: lines.length, zoneLines: 0, ratio: 0 })
       continue
@@ -109,6 +112,90 @@ export function planZones({ specsRoot, config, model, col, write = false }) {
     }
   }
 
+  // config 里的 adapter 不是说明文字，而是 checker 必须逐项证明的执行入口。
+  // 只看全库 seen Set 会有一个 fail-open 形状：CLAUDE.md 有公共区时，即使
+  // 声明的 AGENTS.md 丢失，`agent-entry.common` 仍算“见过”，检查照样全绿。
+  // 这里把声明路径、扫描范围和 marker 一一绑定；同一 canonical projection
+  // 可以（也应该）出现在多个平台 adapter，但每个声明文件都必须各有一份。
+  const adapters = config.agentEntry?.adapters
+  let validAdapters = 0
+  if (config.agentEntry && !Array.isArray(adapters)) {
+    col.add(4, 'error', '`agentEntry.adapters` 必须是数组；每个 adapter 都要声明 platform、path 与 projection')
+  } else if (Array.isArray(adapters)) {
+    if (adapters.length === 0 && resolveProjection(config.projections, 'agent-entry.common')) {
+      col.add(4, 'error',
+        '`agentEntry.common` 已注册投影，但 `agentEntry.adapters` 为空 —— 没有任何平台执行入口')
+    }
+    const adapterPaths = new Set()
+    adapters.forEach((adapter, index) => {
+      const at = `agentEntry.adapters[${index}]`
+      if (!adapter || typeof adapter !== 'object' || Array.isArray(adapter)) {
+        col.add(4, 'error', `\`${at}\` 不是对象`)
+        return
+      }
+
+      const missing = ['platform', 'path', 'projection']
+        .filter((key) => typeof adapter[key] !== 'string' || adapter[key].trim() === '')
+      if (missing.length > 0) {
+        col.add(4, 'error', `\`${at}\` 缺少非空字符串字段：${missing.join('、')}`)
+        return
+      }
+
+      if (path.isAbsolute(adapter.path)) {
+        col.add(4, 'error', `\`${at}.path\` 必须相对 specs root，不能是绝对路径：\`${adapter.path}\``)
+        return
+      }
+      const abs = path.resolve(specsRoot, adapter.path)
+      if (!isInside(specsRoot, abs)) {
+        col.add(4, 'error', `\`${at}.path\` 逃出了 specs root：\`${adapter.path}\``)
+        return
+      }
+      const rel = toPosix(path.relative(specsRoot, abs))
+      if (adapterPaths.has(rel)) {
+        col.add(4, 'error', `adapter 路径重复声明：\`${rel}\``)
+        return
+      }
+      adapterPaths.add(rel)
+
+      if (!fs.existsSync(abs)) {
+        col.add(4, 'error', `找不到已声明的 ${adapter.platform} adapter：\`${rel}\``)
+        return
+      }
+      if (!matchesAny(rel, config.markdownGlobs)) {
+        col.add(4, 'error', `已声明的 adapter \`${rel}\` 不在 markdownGlobs 扫描范围内`)
+        return
+      }
+      if (matchesAny(rel, config.excludeFromScan)) {
+        col.add(4, 'error', `已声明的 adapter \`${rel}\` 被 excludeFromScan 排除了`)
+        return
+      }
+      if (!zonesByFile.has(rel)) {
+        col.add(4, 'error', `已声明的 adapter \`${rel}\` 不是 checker 可扫描的普通 Markdown 文件`)
+        return
+      }
+      const resolved = resolveProjection(config.projections, adapter.projection)
+      if (!resolved) {
+        col.add(4, 'error',
+          `\`${at}.projection\` 指向未注册投影 \`${adapter.projection}\``)
+        return
+      }
+      if (resolved.renderer !== 'agentEntryCommon') {
+        col.add(4, 'error',
+          `\`${at}.projection\` 必须使用 \`agentEntryCommon\` renderer，实际 \`${resolved.renderer}\``)
+        return
+      }
+
+      const matches = (zonesByFile.get(rel) ?? []).filter((zone) => zone.id === adapter.projection)
+      if (matches.length !== 1) {
+        col.add(4, 'error',
+          `已声明的 ${adapter.platform} adapter \`${rel}\` 必须恰好包含一个 \`${adapter.projection}\` 生成区，实际 ${matches.length} 个`,
+          { file: rel })
+        return
+      }
+      validAdapters++
+    })
+  }
+
   // yaml 有、md 无 —— RL-05 那一类
   const expected = enumerateProjections(model, config.projections)
   const uncovered = expected.filter((id) => !seen.has(id))
@@ -129,6 +216,10 @@ export function planZones({ specsRoot, config, model, col, write = false }) {
   col.stat(4, '生成区', zoneCount)
   col.stat(4, '不一致', mismatched)
   col.stat(4, 'yaml 有 / md 无', uncovered.length)
+  if (Array.isArray(adapters)) {
+    col.stat(4, '已声明 adapter', adapters.length)
+    col.stat(4, '有效 adapter', validAdapters)
+  }
   if (write) col.stat(4, '已重写', rewritten)
   return { zoneCount, mismatched, uncovered, ratios, rewritten, plan }
 }

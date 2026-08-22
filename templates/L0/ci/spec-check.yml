@@ -19,6 +19,7 @@ on:
       - '10-why/**'
       - '.spec-suite/**'
       - 'CLAUDE.md'
+      - 'AGENTS.md'
       - 'generated/**'
       - 'scripts/**'
       - 'spec-suite.config.json'

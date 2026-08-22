@@ -54,15 +54,17 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const SCRIPTS = path.join(REPO_ROOT, 'scripts')
 const EXAMPLE = path.join(REPO_ROOT, 'templates', 'L0', 'example')
 
-// 三份派生物，键是 example 根下的相对路径。
+// 四份派生物，键是 example 根下的相对路径。
 //
-// 两个不同的生成器各管一段：CLAUDE.md 的生成区由 check-spec-suite.mjs
+// 两个不同的生成器各管一段：CLAUDE.md / AGENTS.md 的生成区由 check-spec-suite.mjs
 // --write-generated-regions 重写，generated/ 下两份由 generate-contract-bundle.mjs
-// 产出。所以这里是三个独立常量而不是一个整树摘要 —— 失败时要能直接看出是哪条
+// 产出。所以这里是四个独立常量而不是一个整树摘要 —— 失败时要能直接看出是哪条
 // 派生链动了。
 const GOLDEN = {
   'CLAUDE.md':
     'sha256:321a99aaefefafebdaa4a41acf249421555cd68d3be6912b2f5bba9a9f1e4e6e',
+  'AGENTS.md':
+    'sha256:4ff595718a1351841ea69cb7db3deef0545e2fe0c5f82558e3a7eb70951242b8',
   'generated/contract-bundle.json':
     'sha256:19f841d175da342c868c4cbcc0be3ff8ebd73f59fee5d767e0778d89d0c62ae1',
   'generated/manifest.json':
@@ -104,15 +106,20 @@ test('从 canonical inputs 重新派生，得到的还是同一份字节', () =>
     const config = path.join(root, 'spec-suite.config.json')
 
     // 先清空派生物，否则「工具没干活」也能让下面的比对通过。做法与
-    // v1-vertical-slice 里那条一致：generated/ 整删，CLAUDE.md 只清生成区正文
-    // （它寄生在手写文档里，删掉整份文件等于连宿主一起删）。
-    const entry = path.join(root, 'CLAUDE.md')
-    const entryBefore = fs.readFileSync(entry)
+    // v1-vertical-slice 里那条一致：generated/ 整删，两个 adapter 只清生成区正文
+    // （生成区寄生在手写文档里，删掉整份文件等于连宿主一起删）。
+    const entries = [path.join(root, 'CLAUDE.md'), path.join(root, 'AGENTS.md')]
+    const entriesBefore = entries.map((entry) => fs.readFileSync(entry))
     fs.rmSync(path.join(root, 'generated'), { recursive: true, force: true })
     const zoneBody = /(<!-- BEGIN GENERATED: agent-entry\.common -->\n)[\s\S]*?(<!-- END GENERATED: agent-entry\.common -->)/
-    fs.writeFileSync(entry, fs.readFileSync(entry, 'utf8').replace(zoneBody, '$1$2'), 'utf8')
+    entries.forEach((entry) => {
+      fs.writeFileSync(entry, fs.readFileSync(entry, 'utf8').replace(zoneBody, '$1$2'), 'utf8')
+    })
     assert.equal(fs.existsSync(path.join(root, 'generated')), false)
-    assert.notDeepEqual(fs.readFileSync(entry), entryBefore, '生成区没被清空 —— 这条测试正在空过')
+    entries.forEach((entry, index) => {
+      assert.notDeepEqual(fs.readFileSync(entry), entriesBefore[index],
+        `${path.basename(entry)} 生成区没被清空 —— 这条测试正在空过`)
+    })
 
     for (const [script, args] of [
       ['check-spec-suite.mjs', ['--specs-root', root, '--config', config, '--write-generated-regions', '--quiet']],

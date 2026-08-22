@@ -1,14 +1,15 @@
 # example 规格库（最小 L0 示例）
 
-一套已填好的最小规格库：checker 为 0 error，canonical Agent Entry Contract 能确定性渲染 Claude adapter，并且 dictionary 能生成 language-neutral bundle。它也是本 skill 的回归夹具。
+一套已填好的最小规格库：checker 为 0 error，canonical Agent Entry Contract 能确定性渲染 Claude/Codex 两个 adapter，并且 dictionary 能生成 language-neutral bundle。它也是本 skill 的回归夹具。
 
-**开工前先读 [CLAUDE.md](./CLAUDE.md)。**
+**开工前先读当前平台入口：[CLAUDE.md](./CLAUDE.md) 或 [AGENTS.md](./AGENTS.md)。**
 
 ## 目录
 
 ```
 example/
 ├─ CLAUDE.md                    ← Claude adapter（共同生成区 + 平台手写区）
+├─ AGENTS.md                    ← Codex adapter（同一共同生成区 + 平台手写区）
 ├─ .spec-suite/unresolved.yaml  ← 已迁移后的空轻量 registry
 ├─ 10-why/02-业务规则.md         ★ 唯一业务真相源（BR-*）
 ├─ contracts/agent-entry.yaml   ★ canonical 共同 Agent Entry Contract

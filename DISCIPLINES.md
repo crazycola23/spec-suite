@@ -8,12 +8,12 @@
 contracts/agent-entry.yaml          canonical common contract
              |
              +-- render --> CLAUDE.md generated common region
-             +-- render --> AGENTS.md generated common region      (future adapter)
+             +-- render --> AGENTS.md generated common region
              +-- render --> GEMINI.md generated common region      (future adapter)
              +-- render --> .github/copilot-instructions.md        (future adapter)
 ```
 
-V1 只要求跑通一个真实 adapter；模板使用 `CLAUDE.md`。这证明的是 canonical → deterministic render → checked region，不是 Claude 的特殊地位。
+V1 已跑通 Claude 的 `CLAUDE.md` 与 Codex 的 `AGENTS.md`。两者的共同区都来自同一个 canonical contract；平台手写区各自独立。这证明的是 canonical → deterministic multi-adapter render → checked regions，不是任何平台的特殊地位。
 
 每个 adapter 分两区：
 
@@ -21,6 +21,8 @@ V1 只要求跑通一个真实 adapter；模板使用 `CLAUDE.md`。这证明的
 - **平台区**：手写平台加载规则、工具限制和上下文行为；MUST NOT 复制共同纪律。
 
 平台区变更不得改变共同区；canonical 变更必须使共同区随之变化。checker 检查这两个方向。
+
+`spec-suite.config.json` 的 `agentEntry.adapters` 是可执行声明，不是说明文字。注册 `agent-entry.common` 后至少要声明一个 adapter；每一项都必须有非空 `platform`、相对 `path` 与使用 `agentEntryCommon` renderer 的已注册 `projection`。声明文件必须存在、处于 Markdown 扫描范围内，并恰好包含一次对应生成区。另一个 adapter 已经出现相同 projection，不能掩盖本 adapter 缺失。
 
 ## 2. 入口内容的预算
 
@@ -96,4 +98,4 @@ V1 只要求跑通一个真实 adapter；模板使用 `CLAUDE.md`。这证明的
 - 指向规范库与签入 bundle 的共同入口投影；
 - 只属于该消费仓库和平台的手写约定。
 
-已有 Claude/AGENTS 示例见 `templates/L1/consuming-repo-stubs.md`。新增 Gemini、Copilot 等 adapter 时复用同一两区制：共同部分从 canonical source 生成，平台特有部分独立手写。
+规格库的 Claude/Codex 模板见 `templates/L0/CLAUDE.md` 与 `templates/L0/AGENTS.md`；消费库示例见 `templates/L1/consuming-repo-stubs.md`。新增 Gemini、Copilot 等 adapter 时复用同一两区制：共同部分从 canonical source 生成，平台特有部分独立手写。
