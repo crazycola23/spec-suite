@@ -84,9 +84,9 @@ V1 Truth Integrity 保持冻结；新增控制面位于独立的 [`control-plane
 }
 ```
 
-`baseRevision` 是 Agent 开始任务时冻结的 Git commit；`writeSet` 是它允许提交的仓库相对 glob。合并前的 `merge-gate` 会同时检查实际改动是否越出 `writeSet`、目标分支是否仍停在 `baseRevision`，以及目标分支在这期间是否改过同一文件。目标分支哪怕只发生了无碰撞更新，也会返回 `stale-base`，要求先 rebase / 重新投影 / 重新检查，不把旧世界默默当成新世界。
+`baseRevision` 是 Agent 开始任务时冻结的 Git commit；`writeSet` 是它允许提交的仓库相对 glob。合并前的 `merge-gate` 会验证这个基线同时是 target 与 Agent head 的祖先，检查实际改动是否越出 `writeSet`、目标分支是否仍停在 `baseRevision`，以及目标分支在这期间是否改过同一文件。目标分支哪怕只发生了无碰撞更新，也会返回 `stale-base` 或 `revalidation-required`，要求先 rebase / 重新投影 / 重新检查，不把旧世界默默当成新世界。
 
-机器合同：merge gate 只在 target revision 等于 baseRevision、实际改动全在 writeSet 且没有同文件碰撞时放行 fast path。
+机器合同：merge gate 只在 baseRevision 是 target/head 的共同祖先、target revision 等于 baseRevision、实际改动全在 writeSet 且没有同文件碰撞时放行 fast path。声明的 read/write 集合不重叠只能说明“需要重新验证”，不能直接放行合并。
 
 ```bash
 node scripts/merge-gate.mjs \
@@ -103,10 +103,10 @@ node scripts/merge-gate.mjs \
 ```bash
 node scripts/orchestrate.mjs --repo-root . --tasks tasks/batch.json
 node scripts/orchestrate.mjs --repo-root . --tasks tasks/batch.json \
-  --target-ref main --apply --allow-declared-disjoint
+  --target-ref main --apply
 ```
 
-`orchestrate` 只负责已完成分支的计划与集成，不启动 Agent、不替 `readSet` 制造观测事实。默认模式只读；`--apply` 要求目标分支已检出且工作树干净。`--allow-declared-disjoint` 是显式放宽：只有目标期间的改动同时不匹配当前任务的 `readSet` 与 `writeSet` 才允许合并，其他 stale 结果仍停下并报告需要 rebase / 重新投影 / 重新验证。
+`orchestrate` 只负责已完成分支的计划与集成，不启动 Agent、不替 `readSet` 制造观测事实。默认模式只读；`--apply` 要求目标分支已检出且工作树干净。旧版的 `--allow-declared-disjoint` 参数仍可被兼容性调用接受，但不再把声明式 disjoint 当成已完成 revalidation；相关结果统一停下并报告 `revalidation-required`。
 
 ## 两种模式
 

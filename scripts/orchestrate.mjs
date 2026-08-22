@@ -49,7 +49,7 @@ const HELP = `Usage: node scripts/orchestrate.mjs [options]
   --target-ref <ref>              integration target (default: main)
   --output <relative path>        optional result JSON inside repo-root
   --apply                         merge completed task headRefs into target
-  --allow-declared-disjoint       allow stale merges only when target changes match neither readSet nor writeSet
+  --allow-declared-disjoint       deprecated compatibility flag; never bypasses revalidation
   --help                          show this help
 
 Without --apply the command only plans. Exit 0 = plan/integration complete;

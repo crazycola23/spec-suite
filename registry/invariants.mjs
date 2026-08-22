@@ -663,7 +663,7 @@ export const INVARIANTS = [
     id: 'CP-CONCURRENCY-GATE',
     kind: 'control-plane',
     title: 'merge gate 绑定基线与写集',
-    statement: 'merge gate 只在 target revision 等于 baseRevision、实际改动全在 writeSet 且没有同文件碰撞时放行 fast path。',
+    statement: 'merge gate 只在 baseRevision 同时是 target/head 的祖先、target revision 等于 baseRevision、实际改动全在 writeSet 且没有同文件碰撞时放行 fast path；声明式 disjoint 只能触发 revalidation-required，不能直接合并。',
     severity: 'error',
     schemaVersions: [1],
     schemaKind: 'control-plane-document',

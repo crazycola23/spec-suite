@@ -99,7 +99,7 @@ test('plan-only orchestration does not require completed Agent refs', () => {
   }
 })
 
-test('apply integrates disjoint completed branches and re-runs the gate', () => {
+test('apply does not bypass revalidation for disjoint completed branches', () => {
   const { root, base } = makeRepo()
   try {
     const frontendHead = branchFromBase(root, base, 'agent/frontend', 'src/frontend/button.js', 'export const button = 1\n')
@@ -121,10 +121,11 @@ test('apply integrates disjoint completed branches and re-runs the gate', () => 
       apply: true,
       allowDeclaredDisjoint: true,
     })
-    assert.equal(result.status, 'completed')
+    assert.equal(result.status, 'blocked')
     assert.equal(result.integrations.length, 2)
-    assert.ok(result.integrations.some((entry) => entry.gate.status === 'validated-disjoint'))
-    assert.equal(fs.existsSync(path.join(root, 'src', 'frontend', 'button.js')), true)
+    assert.ok(result.integrations.some((entry) => entry.gate.status === 'revalidation-required'))
+    assert.deepEqual(result.blocked.map((entry) => entry.reason), ['revalidation-required'])
+    assert.equal(fs.existsSync(path.join(root, 'src', 'frontend', 'button.js')), false)
     assert.equal(fs.existsSync(path.join(root, 'src', 'backend', 'route.js')), true)
     assert.equal(git(root, ['status', '--porcelain']), '')
   } finally {
@@ -154,7 +155,7 @@ test('apply stops on stale work when declared-disjoint is not explicitly enabled
       apply: true,
     })
     assert.equal(result.status, 'blocked')
-    assert.deepEqual(result.blocked.map((entry) => entry.reason), ['stale-base'])
+    assert.deepEqual(result.blocked.map((entry) => entry.reason), ['revalidation-required'])
     assert.equal(fs.existsSync(path.join(root, 'src', 'frontend', 'button.js')), false)
     assert.equal(fs.existsSync(path.join(root, 'src', 'backend', 'route.js')), true)
   } finally {

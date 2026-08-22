@@ -191,9 +191,79 @@ test('merge gate does not silently accept a stale but disjoint target', () => {
       targetRef: 'main',
       headRef: 'agent-frontend',
     })
-    assert.equal(result.status, 'stale-base')
+    assert.equal(result.status, 'revalidation-required')
     assert.deepEqual(result.collisions, [])
     assert.equal(result.safeToMerge, false)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('merge gate never treats declared disjointness as completed revalidation', () => {
+  const { root, base } = makeRepo()
+  try {
+    git(root, ['switch', '-q', '-c', 'agent-frontend'])
+    commitFile(root, 'src/frontend/button.js', 'export const button = 1\n', 'frontend change')
+    git(root, ['switch', '-q', 'main'])
+    commitFile(root, 'README.md', '# integrator note\n', 'unrelated integration change')
+    const result = evaluateMergeGate({
+      repoRoot: root,
+      task: task(base),
+      targetRef: 'main',
+      headRef: 'agent-frontend',
+      allowValidatedDisjoint: true,
+    })
+    assert.equal(result.status, 'revalidation-required')
+    assert.equal(result.safeToMerge, false)
+    assert.equal(result.checks.requiresRevalidation, true)
+    assert.equal(result.checks.requiresRebase, false)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('merge gate rejects refs whose history does not descend from the task base', () => {
+  const { root, base } = makeRepo()
+  try {
+    git(root, ['switch', '-q', '-c', 'agent-frontend'])
+    commitFile(root, 'src/frontend/button.js', 'export const button = 1\n', 'frontend change')
+    git(root, ['switch', '-q', '--orphan', 'unrelated-target'])
+    for (const entry of fs.readdirSync(root)) {
+      if (entry !== '.git') fs.rmSync(path.join(root, entry), { recursive: true, force: true })
+    }
+    fs.writeFileSync(path.join(root, 'README.md'), '# unrelated target\n')
+    git(root, ['add', 'README.md'])
+    git(root, ['commit', '-q', '-m', 'unrelated target'])
+
+    const invalidTarget = evaluateMergeGate({
+      repoRoot: root,
+      task: task(base),
+      targetRef: 'unrelated-target',
+      headRef: 'agent-frontend',
+    })
+    assert.equal(invalidTarget.status, 'invalid-ancestry')
+    assert.equal(invalidTarget.safeToMerge, false)
+    assert.equal(invalidTarget.checks.baseIsAncestorOfTarget, false)
+    assert.equal(invalidTarget.checks.baseIsAncestorOfHead, true)
+
+    git(root, ['switch', '-q', '--orphan', 'unrelated-head'])
+    for (const entry of fs.readdirSync(root)) {
+      if (entry !== '.git') fs.rmSync(path.join(root, entry), { recursive: true, force: true })
+    }
+    fs.writeFileSync(path.join(root, 'README.md'), '# unrelated head\n')
+    git(root, ['add', 'README.md'])
+    git(root, ['commit', '-q', '-m', 'unrelated head'])
+
+    const invalidHead = evaluateMergeGate({
+      repoRoot: root,
+      task: task(base),
+      targetRef: 'main',
+      headRef: 'unrelated-head',
+    })
+    assert.equal(invalidHead.status, 'invalid-ancestry')
+    assert.equal(invalidHead.safeToMerge, false)
+    assert.equal(invalidHead.checks.baseIsAncestorOfTarget, true)
+    assert.equal(invalidHead.checks.baseIsAncestorOfHead, false)
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }

@@ -3,7 +3,7 @@
  * The module does not merge, rebase, or write the repository.
  */
 
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 
 import { jsonDigest } from './control-plane-common.mjs'
 import {
@@ -31,6 +31,25 @@ function resolveCommit(repoRoot, ref, label) {
   const sha = git(repoRoot, ['rev-parse', '--verify', '--end-of-options', `${value}^{commit}`], label).trim()
   if (!/^[0-9a-f]{40,64}$/i.test(sha)) throw new Error(`${label} did not resolve to a commit`)
   return { ref, id: `git:${sha.toLowerCase()}`, sha: sha.toLowerCase() }
+}
+
+function isAncestor(repoRoot, ancestorSha, descendantSha, label) {
+  const result = spawnSync('git', [
+    '-C',
+    repoRoot,
+    'merge-base',
+    '--is-ancestor',
+    ancestorSha,
+    descendantSha,
+  ], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  if (result.error) throw new Error(`${label}: ${result.error.message}`)
+  if (result.status === 0) return true
+  if (result.status === 1) return false
+  const detail = result.stderr?.trim() || `git exited with status ${result.status}`
+  throw new Error(`${label}: ${detail}`)
 }
 
 function changedFiles(repoRoot, baseSha, headSha, label) {
@@ -68,6 +87,18 @@ export function evaluateMergeGate({
   const base = resolveCommit(repoRoot, concurrency.baseRevision, 'task.baseRevision')
   const target = resolveCommit(repoRoot, targetRef, 'target ref')
   const head = resolveCommit(repoRoot, headRef, 'head ref')
+  const baseIsAncestorOfTarget = isAncestor(
+    repoRoot,
+    base.sha,
+    target.sha,
+    'baseRevision is not an ancestor of target ref',
+  )
+  const baseIsAncestorOfHead = isAncestor(
+    repoRoot,
+    base.sha,
+    head.sha,
+    'baseRevision is not an ancestor of head ref',
+  )
   const agentChangedFiles = changedFiles(repoRoot, base.sha, head.sha, 'Agent diff')
   const targetChangedFiles = changedFiles(repoRoot, base.sha, target.sha, 'target diff')
   const collisions = intersection(agentChangedFiles, targetChangedFiles)
@@ -76,11 +107,12 @@ export function evaluateMergeGate({
   const targetWriteSetOverlaps = targetChangedFiles.filter((file) => writeSetCoversPath(file, concurrency.writeSet))
 
   let status = 'ready'
-  if (scopeViolations.length > 0) status = 'out-of-scope'
+  if (!baseIsAncestorOfTarget || !baseIsAncestorOfHead) status = 'invalid-ancestry'
+  else if (scopeViolations.length > 0) status = 'out-of-scope'
   else if (collisions.length > 0) status = 'write-conflict'
   else if (target.id !== base.id) {
     const disjoint = targetReadSetOverlaps.length === 0 && targetWriteSetOverlaps.length === 0
-    status = allowValidatedDisjoint && disjoint ? 'validated-disjoint' : 'stale-base'
+    status = disjoint ? 'revalidation-required' : 'stale-base'
   }
 
   const result = {
@@ -104,16 +136,19 @@ export function evaluateMergeGate({
     scopeViolations,
     checks: {
       baseRevisionResolved: true,
+      baseIsAncestorOfTarget,
+      baseIsAncestorOfHead,
+      ancestryValid: baseIsAncestorOfTarget && baseIsAncestorOfHead,
       targetAtBase: target.id === base.id,
       headHasChanges: agentChangedFiles.length > 0,
       targetChangedFilesDisjoint: collisions.length === 0,
       targetDisjointFromDeclaredSets: targetReadSetOverlaps.length === 0 && targetWriteSetOverlaps.length === 0,
       writeSetCoversChanges: scopeViolations.length === 0,
-      requiresRebase: target.id !== base.id && status !== 'validated-disjoint',
-      requiresRevalidation: status === 'validated-disjoint',
+      requiresRebase: status === 'stale-base' || status === 'write-conflict',
+      requiresRevalidation: status === 'revalidation-required',
     },
     status,
-    safeToMerge: status === 'ready' || status === 'validated-disjoint',
+    safeToMerge: status === 'ready',
   }
   result.resultDigest = jsonDigest(result)
   return result

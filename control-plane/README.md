@@ -106,7 +106,7 @@ task 可以额外携带并发字段；没有这些字段的旧 task 保持兼容
 | `writeSet` | 非空的仓库相对 glob 数组 | 合并门检查实际改动的写权限范围 |
 | `subject` / `role` | 可选非空字符串 | 把任务和具体 Agent / 角色绑定到 projection 与 Lease |
 
-`readSet` 与 `writeSet` 必须成对出现。调度器对两个 task 的 `write-write` overlap 直接串行化；`write-read` / `read-write` 可以并行，但读者在写者合并后必须重新投影和验证。glob overlap 判定对 wildcard 采用保守策略：误报只会少并行，漏报会隐藏 lost update，因此不接受“看起来大概不重叠”作为放行理由。
+`readSet` 与 `writeSet` 必须成对出现。merge gate 还会验证 `baseRevision` 同时是 target 与 Agent head 的祖先；否则返回 `invalid-ancestry` 并拒绝合并。调度器对两个 task 的 `write-write` overlap 直接串行化；`write-read` / `read-write` 可以并行，但读者在写者合并后必须重新投影和验证。glob overlap 判定对 wildcard 采用保守策略：误报只会少并行，漏报会隐藏 lost update，因此不接受“看起来大概不重叠”作为放行理由。
 
 `readSet` 是 Agent 声明的读取意图，不是工具观测到的实际读操作轨迹。
 
@@ -119,10 +119,12 @@ revalidation obligation. The command does not launch Agents. `--apply` integrate
 completed heads into a checked-out, clean target branch and reruns the merge gate
 before every merge. It fails closed on stale, conflicting, or out-of-scope results.
 
-`--allow-declared-disjoint` enables an explicit validated-disjoint path for target
-changes that match neither the task's declared `readSet` nor `writeSet`. This is
-still based on declared intent, not observed read tracing, and the result records
-that distinction; it must not be treated as a runtime capability grant.
+The legacy `--allow-declared-disjoint` flag is accepted for compatibility but does
+not authorize a stale merge. If target changes match neither the task's declared
+`readSet` nor `writeSet`, the gate returns `revalidation-required` and remains
+unsafe until a real re-projection and validation pipeline runs. This is still based
+on declared intent, not observed read tracing, and must not be treated as a runtime
+capability grant.
 
 `merge-gate.mjs` 只读 Git 历史，不执行 merge/rebase，也不替 Agent 修改工作树。它的 fast path 要求：
 

@@ -44,7 +44,8 @@ const HELP = `Usage: node scripts/merge-gate.mjs [options]
   --head-ref <ref>          Agent result commit/ref (default: HEAD)
   --output <relative path>  optional result JSON inside repo-root
 
-Exit 0 = safe fast-path merge; 2 = stale/conflicting/out-of-scope; 1 = invalid input.
+Exit 0 = safe fast-path merge; 2 = stale/revalidation/conflicting/out-of-scope/invalid ancestry;
+1 = invalid input.
 `
 
 function parseArgs(argv) {
