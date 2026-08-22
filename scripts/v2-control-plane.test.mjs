@@ -23,6 +23,72 @@ const PROJECTION = 'control-plane/example/generated/projection.json'
 const LEASE = 'control-plane/example/generated/lease.json'
 const REQUEST = 'control-plane/example/lease-request.json'
 
+// ---------------------------------------------------------------------------
+// 能力探测（D10）
+// ---------------------------------------------------------------------------
+//
+// 下面一部分断言验证的是**操作系统级**的隔离：POSIX uid/gid 身份、以及符号
+// 链接逃逸。Windows 上这两样都拿不到 —— `process.getuid` 根本不存在，
+// `fs.symlinkSync` 在没有开发者模式/管理员权限时抛 EPERM。
+//
+// 缺能力时有三种做法，只有第三种是对的：
+//   1. 让它红着 —— 每次本机跑都有固定几个失败，久了就没人再看失败列表
+//   2. `if (canDoIt) { … }` 静默绕过 —— 这是隐藏 fallback：覆盖率悄悄降低，
+//      而输出看起来跟全跑一样绿
+//   3. 显式 skip 并打印**缺的是哪个能力**，同时给 CI 一个开关，让"缺能力"
+//      在 CI 上变成硬失败
+//
+// 第三种的后半句才是重点。只有 skip 的话，某天 CI 镜像掉了 symlink 权限、
+// 或者换成非 POSIX runner，整组隔离断言会安静地全部跳过而 CI 依旧全绿 ——
+// 那正是本仓库最想防的形状：**没被证明的东西看起来已被证明**。所以 CI 上设
+// `SPEC_SUITE_REQUIRE_POSIX_ISOLATION=1`，缺能力即失败。
+const REQUIRE_POSIX_ISOLATION = process.env.SPEC_SUITE_REQUIRE_POSIX_ISOLATION === '1'
+
+/** POSIX 身份能力：daemon 的身份隔离全靠 uid/gid，缺一个就无从断言。 */
+const hasPosixIdentity = typeof process.getuid === 'function' && typeof process.getgid === 'function'
+
+/**
+ * symlink 能力：只能靠真的建一个来判断 —— Windows 上 `fs.symlinkSync` 存在，
+ * 调用才抛 EPERM，所以"函数在不在"不是能力。结果缓存，避免每次都动文件系统。
+ */
+let symlinkCapability = null
+function hasSymlinkCapability() {
+  if (symlinkCapability !== null) return symlinkCapability
+  const probe = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-symlink-probe-'))
+  try {
+    fs.mkdirSync(path.join(probe, 'target'))
+    fs.symlinkSync(path.join(probe, 'target'), path.join(probe, 'link'), 'dir')
+    symlinkCapability = true
+  } catch {
+    symlinkCapability = false
+  } finally {
+    fs.rmSync(probe, { recursive: true, force: true })
+  }
+  return symlinkCapability
+}
+
+/**
+ * 缺能力 ⇒ 严格模式下硬失败，否则 skip 并说明缺什么。返回 true 表示调用方
+ * 应当立刻 return。
+ *
+ * 注意 `t.skip()` 之后测试体**仍会继续执行** —— node:test 的 skip 只影响报告，
+ * 不中断函数。所以调用方必须靠返回值提前 return；忘了 return 就会在缺能力的
+ * 平台上照旧抛异常。
+ */
+function requireCapability(t, available, capability, why) {
+  if (available) return false
+  const missing = `缺少能力 ${capability}：${why}`
+  if (REQUIRE_POSIX_ISOLATION) {
+    assert.fail(
+      `${missing}\n`
+      + 'SPEC_SUITE_REQUIRE_POSIX_ISOLATION=1 要求这些隔离断言必须真的跑过 —— '
+      + '在 CI 上跳过安全测试，等于把"未验证"记成了"已通过"。',
+    )
+  }
+  t.skip(missing)
+  return true
+}
+
 function writeJson(target, value) {
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.writeFileSync(target, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
@@ -476,21 +542,6 @@ test('canonical drift, revocation read failure, ambiguous classification, and au
   assert.equal(ambiguous.allowed, false)
   assert.match(ambiguous.reason, /effect_unclassified/)
 
-  const symlinkHarness = makeHarness()
-  const symlinkLease = issueLease(symlinkHarness)
-  const outside = path.join(symlinkHarness.isolatedRoot, 'outside-write-target')
-  fs.mkdirSync(path.join(symlinkHarness.workspaceRoot, 'out'), { recursive: true })
-  fs.mkdirSync(outside)
-  fs.symlinkSync(outside, path.join(symlinkHarness.workspaceRoot, 'out', 'protected'), 'dir')
-  const symlink = interceptEffect(enforcerOptions(
-    symlinkHarness,
-    fileEffect('out/protected/customer.json', 'must not escape'),
-    symlinkLease,
-  ))
-  assert.equal(symlink.allowed, false)
-  assert.match(symlink.reason, /effect_unclassified:file resource traverses a symbolic link/)
-  assert.equal(fs.existsSync(path.join(outside, 'customer.json')), false)
-
   const auditHarness = makeHarness()
   const auditLease = issueLease(auditHarness)
   fs.mkdirSync(path.join(auditHarness.isolatedRoot, 'audit-directory'))
@@ -500,6 +551,28 @@ test('canonical drift, revocation read failure, ambiguous classification, and au
   assert.equal(audit.allowed, false)
   assert.match(audit.reason, /audit_unavailable/)
   assert.equal(fs.existsSync(auditHarness.mockNetworkLogPath), false)
+})
+
+test('a file effect whose path traverses a symbolic link fails closed instead of escaping the workspace', (t) => {
+  // 单独成一条测试而不是并进上面那组：它是这个文件里唯一需要 symlink 能力的
+  // 断言。混在一起的话，缺能力就得整组跳过，连带失掉 canonical drift /
+  // revocation / ambiguous / audit 四个在 Windows 上跑得好的场景。
+  if (requireCapability(t, hasSymlinkCapability(), 'fs.symlinkSync', '无法建立符号链接，因此无法构造逃逸路径')) return
+
+  const harness = makeHarness()
+  const lease = issueLease(harness)
+  const outside = path.join(harness.isolatedRoot, 'outside-write-target')
+  fs.mkdirSync(path.join(harness.workspaceRoot, 'out'), { recursive: true })
+  fs.mkdirSync(outside)
+  fs.symlinkSync(outside, path.join(harness.workspaceRoot, 'out', 'protected'), 'dir')
+  const symlink = interceptEffect(enforcerOptions(
+    harness,
+    fileEffect('out/protected/customer.json', 'must not escape'),
+    lease,
+  ))
+  assert.equal(symlink.allowed, false)
+  assert.match(symlink.reason, /effect_unclassified:file resource traverses a symbolic link/)
+  assert.equal(fs.existsSync(path.join(outside, 'customer.json')), false)
 })
 
 test('edge mutation with a stale digest detects graph drift and satisfies uncertainty monotonicity', () => {
@@ -558,6 +631,12 @@ test('semantic graph completeness remains a trusted declaration when graph and d
 })
 
 test('isolated daemons pin trust roots at startup and expose path-free IPC only', async (t) => {
+  // 这条测试从 `loadIssuerDaemonConfig` 开始就要求 POSIX 身份
+  // （control-plane-trust.mjs 的 requirePosixIdentity 在缺 getuid 时 throw），
+  // 而那正是被测行为本身：daemon 在拿不到身份时**正确地** fail closed。
+  // 缺能力时它抛的是"前提不满足"，不是"隔离失效"，两者必须区分开。
+  if (requireCapability(t, hasPosixIdentity, 'process.getuid/getgid', 'daemon 的身份隔离以 POSIX uid/gid 为前提')) return
+
   const harness = makeHarness()
   const issuer = await startDaemon('lease-issuer-daemon.mjs', harness.issuerConfigPath)
   let enforcer = null
@@ -652,6 +731,8 @@ test('isolated daemons pin trust roots at startup and expose path-free IPC only'
 })
 
 test('G-17 blocks live Stripe mock issuance and defeats a correctly signed over-authorizing lease', async (t) => {
+  if (requireCapability(t, hasPosixIdentity, 'process.getuid/getgid', 'daemon 的身份隔离以 POSIX uid/gid 为前提')) return
+
   const harness = makeHarness()
   const issuer = await startDaemon('lease-issuer-daemon.mjs', harness.issuerConfigPath)
   const enforcer = await startDaemon('effect-enforcer-daemon.mjs', harness.enforcerConfigPath)

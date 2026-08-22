@@ -17,4 +17,13 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
+      # SPEC_SUITE_REQUIRE_POSIX_ISOLATION=1 让"缺 POSIX 身份 / symlink 能力"
+      # 在 CI 上变成硬失败，而不是静默 skip。ubuntu runner 本来就有这两样能力，
+      # 所以这个开关平时不改变任何结果 —— 它防的是将来某次换 runner、换镜像、
+      # 或收紧容器权限之后，整组 OS 级隔离断言安静地全部跳过而 CI 依旧全绿。
+      # 那种绿灯会把"未验证"记成"已通过"，正是本仓库最想防的形状。
       - run: npm test
+        env:
+          SPEC_SUITE_REQUIRE_POSIX_ISOLATION: '1'
+      - run: npm run arch
+      - run: npm run docs -- --check
