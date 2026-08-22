@@ -1,0 +1,10 @@
+# 冻结语料，不要改。见 fixtures/README.md。
+schemaVersion: 1
+suite: frozen-v1
+common:
+  markdown: |
+    ## 本套件的不变量
+
+    1. unknown 保持 unknown —— 没有答案时记录 gap，不填一个看起来合理的值。
+    2. canonical 保持 canonical —— 生成物不是真相，改生成物不改变事实。
+    3. derived 保持可复现 —— 同样的输入必须逐字节生成同样的输出。

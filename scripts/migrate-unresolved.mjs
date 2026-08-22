@@ -9,26 +9,32 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { MESSAGES_ZH, parseFlagsOrThrow } from '../src/shared/argv.mjs'
+import { writeFilesAtomic } from '../src/shared/atomic-write.mjs'
+import { assertSchemaVersion, schemaVersionHint } from '../src/shared/schema-version.mjs'
 import { loadYamlLib, readText } from './check-spec-suite.mjs'
 
+/**
+ * `--block` 可重复 ⇒ `list`。共享解析器会把 list 型的 key 预置成 `[]`，所以
+ * `out.blocks` 的初值不再需要在这里声明。
+ *
+ * 合并前 `--block` 出现在 argv 末尾时会 `push(undefined)`，最终序列化成
+ * `dictionary.yaml` 里的一个 `null` —— 把猜测写进权威文件。现在缺值直接报错。
+ */
+const SPEC = {
+  '--specs-root': { key: 'specsRoot' },
+  '--unresolved': { key: 'unresolved' },
+  '--dictionary': { key: 'dictionary' },
+  '--fact': { key: 'fact' },
+  '--block': { key: 'blocks', list: true },
+  '--protective-default': { key: 'protectiveDefault' },
+  '--rollback-cost': { key: 'rollbackCost' },
+  '--owner': { key: 'owner' },
+  '--help': { key: 'help', flag: true },
+}
+
 function parseArgs(argv) {
-  const out = { blocks: [] }
-  for (let i = 0; i < argv.length; i++) {
-    const value = argv[i + 1]
-    switch (argv[i]) {
-      case '--specs-root': out.specsRoot = value; i++; break
-      case '--unresolved': out.unresolved = value; i++; break
-      case '--dictionary': out.dictionary = value; i++; break
-      case '--fact': out.fact = value; i++; break
-      case '--block': out.blocks.push(value); i++; break
-      case '--protective-default': out.protectiveDefault = value; i++; break
-      case '--rollback-cost': out.rollbackCost = value; i++; break
-      case '--owner': out.owner = value; i++; break
-      case '--help': out.help = true; break
-      default: throw new Error(`未知参数：${argv[i]}`)
-    }
-  }
-  return out
+  return parseFlagsOrThrow(argv, SPEC, MESSAGES_ZH)
 }
 
 const HELP = `用法：
@@ -55,13 +61,9 @@ function nextGapCode(gaps) {
 }
 
 function writePreparedFiles(files) {
-  const prepared = files.map(({ target, content }) => {
-    fs.mkdirSync(path.dirname(target), { recursive: true })
-    const temp = `${target}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`
-    fs.writeFileSync(temp, content, 'utf8')
-    return { target, temp }
-  })
-  for (const item of prepared) fs.renameSync(item.temp, item.target)
+  // 原实现已经是"先全写 temp、再全 rename"，但 rename 中途失败时既不回滚也
+  // 不清 temp —— 会留下一半迁移过的文件加一地 .tmp-*。共享实现补上这两块。
+  writeFilesAtomic(files)
 }
 
 export async function migrateUnresolved(options) {
@@ -85,6 +87,12 @@ export async function migrateUnresolved(options) {
 
   const unresolvedData = unresolvedDoc.toJS() ?? {}
   const dictionaryData = dictionaryDoc.toJS() ?? {}
+
+  // 版本校验必须在**任何**写盘之前，且早于下面的 existing 分支——那条分支也会写。
+  // 迁移一份版本未知的 registry 等于猜它的含义，然后把猜测盖章进派生 gap 的
+  // provenance 里。宁可拒绝迁移。
+  const unresolvedVersion = assertSchemaVersion('unresolved-registry', unresolvedData).version
+
   const facts = Array.isArray(unresolvedData.facts) ? unresolvedData.facts : []
   const gaps = Array.isArray(dictionaryData.gaps) ? dictionaryData.gaps : []
   const existing = gaps.find((gap) => gap?.provenance?.unresolvedFact === options.fact)
@@ -113,7 +121,8 @@ export async function migrateUnresolved(options) {
     closedBy: null,
     closedAt: null,
     provenance: {
-      schemaVersion: unresolvedData.schemaVersion ?? 1,
+      // 校验过的真实版本，不是 `?? 1` 猜出来的。缺版本的 registry 上面已经拒绝了。
+      schemaVersion: unresolvedVersion,
       unresolvedFact: source.fact,
       sourceSearch: Array.isArray(source.sourceSearch) ? source.sourceSearch : [],
       evidence: Array.isArray(source.evidence) ? source.evidence : [],
@@ -139,7 +148,7 @@ async function main() {
     process.stdout.write(`${result.code}${result.migrated ? ' migrated' : ' already-migrated'}\n`)
     return 0
   } catch (error) {
-    process.stderr.write(`迁移失败：${error.message}\n`)
+    process.stderr.write(`迁移失败：${error.message}\n${schemaVersionHint(error)}`)
     return 1
   }
 }

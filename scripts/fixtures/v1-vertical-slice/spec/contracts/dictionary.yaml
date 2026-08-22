@@ -1,4 +1,5 @@
 meta:
+  schemaVersion: 1
   suite: v1-vertical-slice
   truthSource: 10-why/02-rules.md
 

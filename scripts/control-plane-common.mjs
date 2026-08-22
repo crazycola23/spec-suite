@@ -2,18 +2,14 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-export function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize)
-  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return value
-  if (!value || typeof value !== 'object') throw new Error(`value is not JSON-serializable: ${typeof value}`)
-  return Object.fromEntries(
-    Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]),
-  )
-}
+import { canonicalize, stableJson } from '../src/shared/canonical-json.mjs'
+import { isInside } from '../src/shared/paths.mjs'
+import { assertSchemaVersion as assertSchemaVersionPolicy } from '../src/shared/schema-version.mjs'
 
-export function stableJson(value, space = 0) {
-  return JSON.stringify(canonicalize(value), null, space)
-}
+// 这两个名字继续从本模块导出：enforce-effect / lease-issuer / project-context /
+// control-plane-ipc / v2-control-plane.test 都按 `./control-plane-common.mjs`
+// import 它们。实现搬走了，导入路径不动 —— 否则这次合并会变成一次 V2 改动。
+export { canonicalize, stableJson }
 
 export function jsonDigest(value) {
   return `sha256:${crypto.createHash('sha256').update(stableJson(value)).digest('hex')}`
@@ -51,28 +47,12 @@ export function readJson(file, label = file) {
 export function resolveInside(root, candidate, label = 'path') {
   if (typeof candidate !== 'string' || candidate.trim() === '') throw new Error(`${label} must be a non-empty path`)
   const absolute = path.resolve(root, candidate)
-  const relative = path.relative(root, absolute)
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error(`${label} escapes the configured root: ${candidate}`)
-  }
+  if (!isInside(root, absolute)) throw new Error(`${label} escapes the configured root: ${candidate}`)
   return absolute
 }
 
 export function toPosix(value) {
   return value.split(path.sep).join('/')
-}
-
-export function writeJsonAtomic(target, value) {
-  const bytes = `${stableJson(value, 2)}\n`
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  const temporary = `${target}.tmp-${process.pid}-${crypto.randomUUID()}`
-  try {
-    fs.writeFileSync(temporary, bytes, { encoding: 'utf8', mode: 0o600 })
-    fs.renameSync(temporary, target)
-  } finally {
-    if (fs.existsSync(temporary)) fs.rmSync(temporary)
-  }
-  return bytes
 }
 
 export function stringSet(value, label, { allowEmpty = true } = {}) {
@@ -93,8 +73,11 @@ export function sameStrings(left, right) {
   return a.length === b.length && a.every((item, index) => item === b[index])
 }
 
+// 保留这个签名：control plane 的四个调用方按 (document, label) 调用它。
+// 判定本身已经上移到中立层的策略表 —— V1 与 V2 现在共用同一个判定点，
+// 但各自保留原有的错误语义（V1 收进 collector，V2 抛异常）。
 export function assertSchemaVersion(document, label) {
-  if (document.schemaVersion !== 1) throw new Error(`${label}.schemaVersion must be 1`)
+  assertSchemaVersionPolicy('control-plane-document', document, { label })
 }
 
 export function canonicalEffectReference(effect, label = 'effect') {

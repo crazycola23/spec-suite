@@ -4,6 +4,7 @@
 # 指向 10-why/02-业务规则.md 里真实存在的 BR-* 标题。
 
 meta:
+  schemaVersion: 1
   suite: example
   truthSource: 10-why/02-业务规则.md
 

@@ -10,6 +10,12 @@
 # inheritable: false 的含义是任何角色模板、任何上级码都不得隐式带来它。
 #   必须逐个显式授予。高危码一律 false。
 
+meta:
+  # 这份文件遵循的 schema 版本。由工具认定，不要手改成更高的数字 ——
+  # 工具遇到高于自己支持范围的版本会直接拒绝，不猜测其含义。
+  # suite / truthSource 由同一 config 里的主 dictionary 提供，这里不重复。
+  schemaVersion: 1
+
 permissions:
   # <示例，删除本条>
   - code: <前缀>:budget:release

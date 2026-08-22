@@ -1,0 +1,6 @@
+{
+  "_comment": "冻结语料，不要改。见 fixtures/README.md。本身合法（schemaVersion 1）：断言必须落在 canonical state 上。",
+  "schemaVersion": 1,
+  "complete": true,
+  "nodes": []
+}

@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { isInside } from '../src/shared/paths.mjs'
 import {
   assertSchemaVersion,
   readJson,
@@ -23,10 +24,8 @@ function assertAbsolute(candidate, label) {
 function assertOutside(root, candidate, label) {
   const absoluteRoot = path.resolve(root)
   const absolute = assertAbsolute(candidate, label)
-  const relative = path.relative(absoluteRoot, absolute)
-  if (relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) {
-    throw new Error(`${label} must be outside the agent workspace`)
-  }
+  // 同一个谓词的反向用法：落在 workspace 之内（含 workspace 自身）即拒绝。
+  if (isInside(absoluteRoot, absolute)) throw new Error(`${label} must be outside the agent workspace`)
   return absolute
 }
 
@@ -155,8 +154,8 @@ export function loadEnforcerDaemonConfig(configPath) {
   ])
   const snapshotRoot = validateSnapshot(envelope)
   const workspaceRoot = path.resolve(envelope.config.workspaceRoot)
-  const relativeWorkspace = path.relative(envelope.agentWorkspaceRoot, workspaceRoot)
-  if (relativeWorkspace === '..' || relativeWorkspace.startsWith(`..${path.sep}`) || path.isAbsolute(relativeWorkspace)) {
+  // 正向用法：enforcer 的 workspaceRoot 必须落在固定的 agent workspace 之内。
+  if (!isInside(envelope.agentWorkspaceRoot, workspaceRoot)) {
     throw new Error('enforcer workspaceRoot must be inside the fixed agent workspace')
   }
   const workspaceStat = assertNotSymlink(workspaceRoot, 'enforcer workspaceRoot')

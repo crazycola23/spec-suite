@@ -7,13 +7,18 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { jsonDigest, stableJson } from './control-plane-common.mjs'
-import { loadIssuerDaemonConfig } from './control-plane-trust.mjs'
-import { interceptEffect } from './enforce-effect.mjs'
-import { projectContext } from './project-context.mjs'
+import { jsonDigest, stableJson } from '../../scripts/control-plane-common.mjs'
+import { loadIssuerDaemonConfig } from '../../scripts/control-plane-trust.mjs'
+import { blankComments } from '../../scripts/check-architecture.mjs'
+import { classifyEffect, interceptEffect } from '../../scripts/enforce-effect.mjs'
+import { projectContext } from '../../scripts/project-context.mjs'
 
-const HERE = path.dirname(fileURLToPath(import.meta.url))
-const REPO_ROOT = path.join(HERE, '..')
+// 这个文件搬到 tests/adversarial/ 之前，只有一个 `HERE` 常量，而它同时被当作两个
+// 意思用：「scripts 目录」（spawn 被测 CLI）与「仓库根的下一级」（`HERE/..`）。
+// 在 scripts/ 下这两个意思恰好都对，所以重合是看不见的；搬家之后它们指向不同深度。
+// 拆成两个显式常量并**删掉 HERE**，让这种重合不可能再长回来。
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+const SCRIPTS = path.join(REPO_ROOT, 'scripts')
 const CONTROL_PLANE = path.join(REPO_ROOT, 'control-plane')
 const GRAPH = 'control-plane/example/context-graph.json'
 const TASK = 'control-plane/example/task.json'
@@ -22,6 +27,72 @@ const POLICY = 'control-plane/example/issuer-policy.json'
 const PROJECTION = 'control-plane/example/generated/projection.json'
 const LEASE = 'control-plane/example/generated/lease.json'
 const REQUEST = 'control-plane/example/lease-request.json'
+
+// ---------------------------------------------------------------------------
+// 能力探测（D10）
+// ---------------------------------------------------------------------------
+//
+// 下面一部分断言验证的是**操作系统级**的隔离：POSIX uid/gid 身份、以及符号
+// 链接逃逸。Windows 上这两样都拿不到 —— `process.getuid` 根本不存在，
+// `fs.symlinkSync` 在没有开发者模式/管理员权限时抛 EPERM。
+//
+// 缺能力时有三种做法，只有第三种是对的：
+//   1. 让它红着 —— 每次本机跑都有固定几个失败，久了就没人再看失败列表
+//   2. `if (canDoIt) { … }` 静默绕过 —— 这是隐藏 fallback：覆盖率悄悄降低，
+//      而输出看起来跟全跑一样绿
+//   3. 显式 skip 并打印**缺的是哪个能力**，同时给 CI 一个开关，让"缺能力"
+//      在 CI 上变成硬失败
+//
+// 第三种的后半句才是重点。只有 skip 的话，某天 CI 镜像掉了 symlink 权限、
+// 或者换成非 POSIX runner，整组隔离断言会安静地全部跳过而 CI 依旧全绿 ——
+// 那正是本仓库最想防的形状：**没被证明的东西看起来已被证明**。所以 CI 上设
+// `SPEC_SUITE_REQUIRE_POSIX_ISOLATION=1`，缺能力即失败。
+const REQUIRE_POSIX_ISOLATION = process.env.SPEC_SUITE_REQUIRE_POSIX_ISOLATION === '1'
+
+/** POSIX 身份能力：daemon 的身份隔离全靠 uid/gid，缺一个就无从断言。 */
+const hasPosixIdentity = typeof process.getuid === 'function' && typeof process.getgid === 'function'
+
+/**
+ * symlink 能力：只能靠真的建一个来判断 —— Windows 上 `fs.symlinkSync` 存在，
+ * 调用才抛 EPERM，所以"函数在不在"不是能力。结果缓存，避免每次都动文件系统。
+ */
+let symlinkCapability = null
+function hasSymlinkCapability() {
+  if (symlinkCapability !== null) return symlinkCapability
+  const probe = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-symlink-probe-'))
+  try {
+    fs.mkdirSync(path.join(probe, 'target'))
+    fs.symlinkSync(path.join(probe, 'target'), path.join(probe, 'link'), 'dir')
+    symlinkCapability = true
+  } catch {
+    symlinkCapability = false
+  } finally {
+    fs.rmSync(probe, { recursive: true, force: true })
+  }
+  return symlinkCapability
+}
+
+/**
+ * 缺能力 ⇒ 严格模式下硬失败，否则 skip 并说明缺什么。返回 true 表示调用方
+ * 应当立刻 return。
+ *
+ * 注意 `t.skip()` 之后测试体**仍会继续执行** —— node:test 的 skip 只影响报告，
+ * 不中断函数。所以调用方必须靠返回值提前 return；忘了 return 就会在缺能力的
+ * 平台上照旧抛异常。
+ */
+function requireCapability(t, available, capability, why) {
+  if (available) return false
+  const missing = `缺少能力 ${capability}：${why}`
+  if (REQUIRE_POSIX_ISOLATION) {
+    assert.fail(
+      `${missing}\n`
+      + 'SPEC_SUITE_REQUIRE_POSIX_ISOLATION=1 要求这些隔离断言必须真的跑过 —— '
+      + '在 CI 上跳过安全测试，等于把"未验证"记成了"已通过"。',
+    )
+  }
+  t.skip(missing)
+  return true
+}
 
 function writeJson(target, value) {
   fs.mkdirSync(path.dirname(target), { recursive: true })
@@ -122,7 +193,7 @@ function makeHarness() {
 }
 
 async function startDaemon(script, configPath) {
-  const child = spawn(process.execPath, [path.join(HERE, script), '--config', configPath], {
+  const child = spawn(process.execPath, [path.join(SCRIPTS, script), '--config', configPath], {
     cwd: REPO_ROOT,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
@@ -212,7 +283,7 @@ function persistProjection(harness, projection = projectContext(projectionOption
 
 function runIssuer(harness, overrides = {}) {
   const args = [
-    path.join(HERE, 'lease-issuer.mjs'),
+    path.join(SCRIPTS, 'lease-issuer.mjs'),
     '--specs-root', harness.specsRoot,
     '--graph', GRAPH,
     '--task', TASK,
@@ -476,21 +547,6 @@ test('canonical drift, revocation read failure, ambiguous classification, and au
   assert.equal(ambiguous.allowed, false)
   assert.match(ambiguous.reason, /effect_unclassified/)
 
-  const symlinkHarness = makeHarness()
-  const symlinkLease = issueLease(symlinkHarness)
-  const outside = path.join(symlinkHarness.isolatedRoot, 'outside-write-target')
-  fs.mkdirSync(path.join(symlinkHarness.workspaceRoot, 'out'), { recursive: true })
-  fs.mkdirSync(outside)
-  fs.symlinkSync(outside, path.join(symlinkHarness.workspaceRoot, 'out', 'protected'), 'dir')
-  const symlink = interceptEffect(enforcerOptions(
-    symlinkHarness,
-    fileEffect('out/protected/customer.json', 'must not escape'),
-    symlinkLease,
-  ))
-  assert.equal(symlink.allowed, false)
-  assert.match(symlink.reason, /effect_unclassified:file resource traverses a symbolic link/)
-  assert.equal(fs.existsSync(path.join(outside, 'customer.json')), false)
-
   const auditHarness = makeHarness()
   const auditLease = issueLease(auditHarness)
   fs.mkdirSync(path.join(auditHarness.isolatedRoot, 'audit-directory'))
@@ -500,6 +556,28 @@ test('canonical drift, revocation read failure, ambiguous classification, and au
   assert.equal(audit.allowed, false)
   assert.match(audit.reason, /audit_unavailable/)
   assert.equal(fs.existsSync(auditHarness.mockNetworkLogPath), false)
+})
+
+test('a file effect whose path traverses a symbolic link fails closed instead of escaping the workspace', (t) => {
+  // 单独成一条测试而不是并进上面那组：它是这个文件里唯一需要 symlink 能力的
+  // 断言。混在一起的话，缺能力就得整组跳过，连带失掉 canonical drift /
+  // revocation / ambiguous / audit 四个在 Windows 上跑得好的场景。
+  if (requireCapability(t, hasSymlinkCapability(), 'fs.symlinkSync', '无法建立符号链接，因此无法构造逃逸路径')) return
+
+  const harness = makeHarness()
+  const lease = issueLease(harness)
+  const outside = path.join(harness.isolatedRoot, 'outside-write-target')
+  fs.mkdirSync(path.join(harness.workspaceRoot, 'out'), { recursive: true })
+  fs.mkdirSync(outside)
+  fs.symlinkSync(outside, path.join(harness.workspaceRoot, 'out', 'protected'), 'dir')
+  const symlink = interceptEffect(enforcerOptions(
+    harness,
+    fileEffect('out/protected/customer.json', 'must not escape'),
+    lease,
+  ))
+  assert.equal(symlink.allowed, false)
+  assert.match(symlink.reason, /effect_unclassified:file resource traverses a symbolic link/)
+  assert.equal(fs.existsSync(path.join(outside, 'customer.json')), false)
 })
 
 test('edge mutation with a stale digest detects graph drift and satisfies uncertainty monotonicity', () => {
@@ -558,6 +636,12 @@ test('semantic graph completeness remains a trusted declaration when graph and d
 })
 
 test('isolated daemons pin trust roots at startup and expose path-free IPC only', async (t) => {
+  // 这条测试从 `loadIssuerDaemonConfig` 开始就要求 POSIX 身份
+  // （control-plane-trust.mjs 的 requirePosixIdentity 在缺 getuid 时 throw），
+  // 而那正是被测行为本身：daemon 在拿不到身份时**正确地** fail closed。
+  // 缺能力时它抛的是"前提不满足"，不是"隔离失效"，两者必须区分开。
+  if (requireCapability(t, hasPosixIdentity, 'process.getuid/getgid', 'daemon 的身份隔离以 POSIX uid/gid 为前提')) return
+
   const harness = makeHarness()
   const issuer = await startDaemon('lease-issuer-daemon.mjs', harness.issuerConfigPath)
   let enforcer = null
@@ -652,6 +736,8 @@ test('isolated daemons pin trust roots at startup and expose path-free IPC only'
 })
 
 test('G-17 blocks live Stripe mock issuance and defeats a correctly signed over-authorizing lease', async (t) => {
+  if (requireCapability(t, hasPosixIdentity, 'process.getuid/getgid', 'daemon 的身份隔离以 POSIX uid/gid 为前提')) return
+
   const harness = makeHarness()
   const issuer = await startDaemon('lease-issuer-daemon.mjs', harness.issuerConfigPath)
   const enforcer = await startDaemon('effect-enforcer-daemon.mjs', harness.enforcerConfigPath)
@@ -701,6 +787,94 @@ test('G-17 blocks live Stripe mock issuance and defeats a correctly signed over-
   assertMachineCause(enforcement.decision.cause, 'unresolved')
   assert.equal(enforcement.decision.cause.blockingRecord, 'G-17')
   assert.equal(fs.existsSync(harness.mockNetworkLogPath), false)
+})
+
+// ---------------------------------------------------------------------------
+// P2：effect class 集合的封边
+// ---------------------------------------------------------------------------
+
+/** 取一个顶层函数的源码：从声明行到第一处独占一行的 `}`。 */
+function functionSource(src, declaration) {
+  const lines = src.split('\n')
+  const start = lines.findIndex((l) => l.startsWith(declaration))
+  assert.notEqual(start, -1, `找不到函数声明：${declaration}`)
+  const end = lines.findIndex((l, i) => i > start && l === '}')
+  assert.notEqual(end, -1, `${declaration} 没有以顶层 } 结束`)
+  return lines.slice(start, end + 1).join('\n')
+}
+
+/** 一段源码里比较过的 effect kind 字面量。先剥注释，否则注释里提到的 kind 会被当成分支。 */
+const kindsIn = (src) => new Set([...blankComments(src).matchAll(/kind === '([^']+)'/g)].map((m) => m[1]))
+
+const KNOWN_EFFECT_KINDS = ['file.write', 'network.mock.live-stripe', 'network.mock.protected']
+
+test('P2：effect class 恰好是这 3 个，新增一类会撞上这条测试', () => {
+  // 这条测试是**故意脆弱**的。P2 的约束是"不新增 effect type（shell / database /
+  // email / GitHub / cloud / payment / browser）"，而这个约束写在计划文档里，
+  // 没有任何机器强制 —— 于是它迟早被人顺手绕过。
+  //
+  // 这里不打算让新增 class 变得不可能，只打算让它**不可能悄悄发生**：往
+  // classifyEffect 的 if 链里加一个 kind，就会撞上下面这条断言，作者会被迫
+  // 来读这段注释、并解释新 class 为什么不需要走统一授权模型。
+  const src = fs.readFileSync(path.join(SCRIPTS, 'enforce-effect.mjs'), 'utf8')
+  const classify = kindsIn(functionSource(src, 'export function classifyEffect('))
+
+  assert.deepEqual(
+    [...classify].sort(), KNOWN_EFFECT_KINDS,
+    'effect class 集合变了。P2 明确不扩展 effect type —— 新增一类必须复用统一授权模型'
+    + '（protected + protection 三元组 + lease 校验），不能在 if 链上再加一个特例分支。',
+  )
+
+  // 分类链与执行链必须覆盖同一集合。少一边的后果不同但都很糟：
+  // 只在 classify 里加 ⇒ 授权通过后 `authorized effect lost its classifier`
+  // （fail closed，但要到执行那一刻才炸）；只在 execute 里加 ⇒ 那段代码永远
+  // 到不了，是死代码，读的人却会以为该 kind 被支持。
+  const execute = kindsIn(functionSource(src, 'function executeAuthorizedEffect('))
+  assert.deepEqual(
+    [...execute].sort(), [...classify].sort(),
+    '分类链与执行链的 effect kind 集合不一致 —— 两条 if 链必须同步维护',
+  )
+})
+
+test('P2：只有 file.write 能被 baseline 免 lease，新 effect class 天生需要 lease', () => {
+  // `baselineAuthorizes` 里硬编码了 `classified.kind === 'file.write'`，所以
+  // baseline 规则**只对文件写生效**。这个事实值得单独锁住：它意味着将来若真
+  // 有人加了第四类 effect，那一类默认落在"必须持 lease"一侧，而不是默认免检。
+  //
+  // 这是 fail-closed 的方向。反过来（新 class 默认可被 baseline 命中）会让
+  // 一条 resourcePrefix 意外授权一整类全新的副作用。
+  const src = fs.readFileSync(path.join(SCRIPTS, 'enforce-effect.mjs'), 'utf8')
+  const baseline = kindsIn(functionSource(src, 'function baselineAuthorizes('))
+  assert.deepEqual(
+    [...baseline], ['file.write'],
+    'baseline 的免 lease 判定不再只针对 file.write —— 这会让新 effect class 默认免检，方向错了',
+  )
+})
+
+test('P2：未登记的 effect kind 在分类与拦截两层都 fail closed', () => {
+  // 静态断言只能证明"源码里现在有 3 个分支"。这条证明的是运行期行为：
+  // 没登记的 kind 不会掉进任何一个分支后被当成无害的东西放过去。
+  const unknown = {
+    schemaVersion: 1,
+    taskId: 'task:customer-update',
+    subject: 'agent:harness',
+    kind: 'shell.exec',
+    resource: 'rm -rf /',
+    payload: null,
+  }
+
+  assert.throws(
+    () => classifyEffect(unknown, '/workspace', { baseline: [], protectedResources: [] }),
+    /effect kind is not classified/,
+    '未知 kind 必须抛错，不能返回一个 protected:false 的分类结果',
+  )
+
+  const harness = makeHarness()
+  const lease = issueLease(harness)
+  const decision = interceptEffect(enforcerOptions(harness, unknown, lease))
+  assert.equal(decision.allowed, false, '持有有效 lease 也不能让未知 kind 通过')
+  assert.match(decision.reason, /effect_unclassified/)
+  assert.equal(fs.existsSync(harness.mockNetworkLogPath), false, '被拒的 effect 不得留下任何副作用')
 })
 
 test('protected file classification rejects any baseline overlap before authorization', () => {

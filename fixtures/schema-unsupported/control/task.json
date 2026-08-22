@@ -1,0 +1,7 @@
+{
+  "_comment": "冻结语料，不要改。见 fixtures/README.md。本身合法（schemaVersion 1）。",
+  "schemaVersion": 1,
+  "taskId": "task:schema-unsupported",
+  "roots": [],
+  "surfaces": []
+}

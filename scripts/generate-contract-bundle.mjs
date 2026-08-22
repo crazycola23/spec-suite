@@ -11,19 +11,24 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { MESSAGES_ZH, parseFlagsOrThrow } from '../src/shared/argv.mjs'
+import { writeFilesAtomic } from '../src/shared/atomic-write.mjs'
+// canonicalize 从这里来，而不再是本文件下方的一份局部实现（D4）。两份实现的差别
+// 只有一处：本文件那份对非 JSON 值**静默放行**，于是 `undefined` / 函数 / symbol
+// 会被随后的 JSON.stringify 悄悄丢掉 —— 字段从 bundle 里消失，而 manifest 的
+// digest 照样自洽。合法输入的输出逐字节不变，收紧只影响以前被静默丢弃的输入。
+import { canonicalize } from '../src/shared/canonical-json.mjs'
+import { isInside } from '../src/shared/paths.mjs'
 import { extractIdTokens, loadYamlLib, readText, run, toPosix } from './check-spec-suite.mjs'
 
+const SPEC = {
+  '--specs-root': { key: 'specsRoot' },
+  '--config': { key: 'config' },
+  '--help': { key: 'help', flag: true },
+}
+
 function parseArgs(argv) {
-  const out = {}
-  for (let i = 0; i < argv.length; i++) {
-    switch (argv[i]) {
-      case '--specs-root': out.specsRoot = argv[++i]; break
-      case '--config': out.config = argv[++i]; break
-      case '--help': out.help = true; break
-      default: throw new Error(`未知参数：${argv[i]}`)
-    }
-  }
-  return out
+  return parseFlagsOrThrow(argv, SPEC, MESSAGES_ZH)
 }
 
 const HELP = `用法：node generate-contract-bundle.mjs [选项]
@@ -40,24 +45,8 @@ function resolveInside(root, rel, label) {
   if (typeof rel !== 'string' || rel.trim() === '') throw new Error(`${label} 必须是非空相对路径`)
   if (path.isAbsolute(rel)) throw new Error(`${label} 必须是相对路径：${rel}`)
   const absolute = path.resolve(root, rel)
-  const back = path.relative(root, absolute)
-  if (back === '..' || back.startsWith(`..${path.sep}`) || path.isAbsolute(back)) {
-    throw new Error(`${label} 越出规格库：${rel}`)
-  }
+  if (!isInside(root, absolute)) throw new Error(`${label} 越出规格库：${rel}`)
   return absolute
-}
-
-function isInside(parent, child) {
-  const rel = path.relative(parent, child)
-  return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel))
-}
-
-function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize)
-  if (!value || typeof value !== 'object') return value
-  return Object.fromEntries(
-    Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]),
-  )
 }
 
 function validateSources({ contracts, config, defs, generatedRoot, specsRoot }) {
@@ -117,27 +106,11 @@ function validateSources({ contracts, config, defs, generatedRoot, specsRoot }) 
 }
 
 function writeAllAfterValidation(files) {
-  const snapshots = files.map(({ target, content }) => ({
-    target,
-    content,
-    existed: fs.existsSync(target),
-    previous: fs.existsSync(target) ? fs.readFileSync(target) : null,
-  }))
-  const written = []
-  try {
-    for (const file of snapshots) {
-      fs.mkdirSync(path.dirname(file.target), { recursive: true })
-      if (file.existed && fs.readFileSync(file.target, 'utf8') === file.content) continue
-      fs.writeFileSync(file.target, file.content, 'utf8')
-      written.push(file)
-    }
-  } catch (error) {
-    for (const file of written.reverse()) {
-      if (file.existed) fs.writeFileSync(file.target, file.previous)
-      else if (fs.existsSync(file.target)) fs.rmSync(file.target)
-    }
-    throw error
-  }
+  // 语义不变：全有或全无，且内容相同的文件不重写。
+  // 变化的是**强度** —— 原实现直写目标，第二个文件写失败时第一个已经落在
+  // 目标位置，靠内存快照还原；现在所有 temp 写完才开始 rename，所以那类失败
+  // 发生时目标一个都没被动过，根本用不到回滚。回滚只剩 rename 阶段兜底。
+  writeFilesAtomic(files, { skipUnchanged: true })
 }
 
 export async function generateContractBundle(options = {}) {

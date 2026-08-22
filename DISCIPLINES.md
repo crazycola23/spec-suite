@@ -39,12 +39,14 @@ V1 只要求跑通一个真实 adapter；模板使用 `CLAUDE.md`。这证明的
 
 ## 3. 通用禁令与领域禁令
 
-`N-01`～`N-04` 可作为共同基线：
+`N-01`～`N-04` 可作为共同基线（下列由 `registry/invariants.mjs` 生成）：
 
+<!-- BEGIN GENERATED: registry.bans -->
 - `N-01`：无权威 source 的事实不得进入 canonical contract。
 - `N-02`：generated region、bundle、manifest 与 consumer copy 不得手改或反向成为 source。
 - `N-03`：下游引用稳定 ID，不复制 canonical 描述。
 - `N-04`：实现选择不得隐式改变业务口径。
+<!-- END GENERATED: registry.bans -->
 
 领域禁令必须来自项目里的真实风险路径。用以下问题抽取：
 

@@ -29,28 +29,27 @@ import {
   stableJson,
   stringSet,
   validatePolicyFileRules,
-  writeJsonAtomic,
 } from './control-plane-common.mjs'
+import { MESSAGES_EN, parseFlagsOrThrow } from '../src/shared/argv.mjs'
+import { writeFileAtomic } from '../src/shared/atomic-write.mjs'
+import { isInside } from '../src/shared/paths.mjs'
 import { projectContext } from './project-context.mjs'
 
+const SPEC = {
+  '--specs-root': { key: 'specsRoot' },
+  '--graph': { key: 'graph' },
+  '--task': { key: 'task' },
+  '--state': { key: 'state' },
+  '--policy': { key: 'policy' },
+  '--projection': { key: 'projection' },
+  '--request': { key: 'request' },
+  '--private-key': { key: 'privateKey' },
+  '--output': { key: 'output' },
+  '--help': { key: 'help', flag: true },
+}
+
 function parseArgs(argv) {
-  const result = {}
-  for (let index = 0; index < argv.length; index++) {
-    switch (argv[index]) {
-      case '--specs-root': result.specsRoot = argv[++index]; break
-      case '--graph': result.graph = argv[++index]; break
-      case '--task': result.task = argv[++index]; break
-      case '--state': result.state = argv[++index]; break
-      case '--policy': result.policy = argv[++index]; break
-      case '--projection': result.projection = argv[++index]; break
-      case '--request': result.request = argv[++index]; break
-      case '--private-key': result.privateKey = argv[++index]; break
-      case '--output': result.output = argv[++index]; break
-      case '--help': result.help = true; break
-      default: throw new Error(`unknown argument: ${argv[index]}`)
-    }
-  }
-  return result
+  return parseFlagsOrThrow(argv, SPEC, MESSAGES_EN)
 }
 
 const HELP = `Usage: node scripts/lease-issuer.mjs [options]
@@ -68,10 +67,8 @@ const HELP = `Usage: node scripts/lease-issuer.mjs [options]
 
 function assertOutside(root, candidate, label) {
   if (!path.isAbsolute(candidate)) throw new Error(`${label} must be an absolute isolated path`)
-  const relative = path.relative(root, candidate)
-  if (relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) {
-    throw new Error(`${label} must be outside the agent-readable specs root`)
-  }
+  // 同一个谓词的反向用法：落在 specs root 之内（含 root 自身）即拒绝。
+  if (isInside(root, candidate)) throw new Error(`${label} must be outside the agent-readable specs root`)
 }
 
 function readPrivateKey(specsRoot, keyPath) {
@@ -294,7 +291,13 @@ async function main() {
     const lease = issueLease({ options })
     if (options.output) {
       const root = path.resolve(options.specsRoot ?? '.')
-      writeJsonAtomic(resolveInside(root, options.output, '--output'), lease)
+      // 0o600：lease 是签名凭证，不该对同机其它用户可读。
+      // 序列化与下面 stdout 分支逐字相同，两条路径的字节因此必然一致。
+      writeFileAtomic(
+        resolveInside(root, options.output, '--output'),
+        `${stableJson(lease, 2)}\n`,
+        { mode: 0o600 },
+      )
     } else {
       process.stdout.write(`${stableJson(lease, 2)}\n`)
     }

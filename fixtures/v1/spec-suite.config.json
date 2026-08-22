@@ -1,0 +1,27 @@
+{
+  "_comment": "冻结语料，不要改。见 fixtures/README.md。这份 config 刻意比 templates/L0/example 的窄：它只覆盖带版本字段的 artifact 面，不演示「一套好套件长什么样」——那是 example 的活儿。",
+  "schemaVersion": 1,
+  "dictionaries": ["contracts/dictionary.yaml"],
+  "generatedDir": "generated",
+  "claudeMd": "CLAUDE.md",
+  "agentEntry": {
+    "source": "contracts/agent-entry.yaml",
+    "adapters": []
+  },
+  "bundle": {
+    "inputs": ["contracts/dictionary.yaml"],
+    "output": "generated/contract-bundle.json",
+    "manifest": "generated/manifest.json"
+  },
+  "idNamespaces": [
+    { "prefix": "BR", "pattern": "^BR-[A-Z]+-\\d{3}$", "kind": "rule", "definedIn": ["10-why/02-rules.md"] },
+    { "prefix": "G", "pattern": "^G-\\d{2}$", "kind": "gap", "definedIn": ["contracts/dictionary.yaml"] }
+  ],
+  "projections": {},
+  "structuredFileGlobs": ["**/*.yaml", "**/*.yml", "**/*.json"],
+  "markdownGlobs": ["**/*.md"],
+  "ddlGlobs": [],
+  "excludeFromScan": ["node_modules/**", ".git/**", "generated/**"],
+  "labelCopyAllowlist": [],
+  "coverageRequirements": []
+}

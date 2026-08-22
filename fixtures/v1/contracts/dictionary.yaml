@@ -1,0 +1,51 @@
+# 冻结语料，不要改。见 fixtures/README.md。
+#
+# 这份字典只有一个 gaps 集合，且每条都带齐 RECORD_RULES.gaps 的 7 个必填键。
+# 它存在的目的是「一份写于 schema v1 的字典，将来的工具仍然接受」，
+# 不是演示怎么写字典。
+meta:
+  suite: frozen-v1
+  truthSource: 10-why/02-rules.md
+  schemaVersion: 1
+
+gaps:
+  # 一条 open gap：protectiveDefault 是「未知时的保护性默认」，
+  # 它不等于「答案」——这正是 unknown stays unknown 的落点。
+  - code: G-01
+    missing: 退款截止时间未定
+    source: BR-REFUND-001
+    blocks: [BR-REFUND-002]
+    protectiveDefault: 一律拒绝退款，转人工
+    rollbackCost: high
+    owner: 平台组
+    status: open
+
+  # 一条 resolved gap：证明冻结语料里两种 status 都在版本面上被接受。
+  - code: G-02
+    missing: 汇率取整方向未定
+    source: BR-RATE-001
+    blocks: [BR-RATE-002]
+    protectiveDefault: 向下取整，差额记账
+    rollbackCost: low
+    owner: 平台组
+    status: resolved
+
+# 一个非 gaps 集合。gaps 不进 bundle（生成器只跳过 meta/gaps），
+# 所以没有这一节，contract-bundle.json 就是空的 `contracts: {}`，
+# 「派生物逐字节可复现」这条测试也就没有实质内容可比。
+errors:
+  - code: E-REFUND-EXPIRED
+    httpStatus: 409
+    class: business
+    label: 退款已过截止时间
+    source: BR-REFUND-002
+    details: [deadline]
+    frontendAction: manualOnly
+
+  - code: E-RATE-UNAVAILABLE
+    httpStatus: 503
+    class: external
+    label: 汇率源不可用
+    source: BR-RATE-002
+    details: [provider]
+    frontendAction: toast

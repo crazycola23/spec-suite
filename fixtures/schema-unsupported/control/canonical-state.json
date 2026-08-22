@@ -1,0 +1,9 @@
+{
+  "_comment": "冻结语料，不要改。见 fixtures/README.md。schemaVersion 字面是 99 —— 这是本语料唯一的缺陷来源。注意 canonicalRevision / contextGraphDigest 是占位值：assertSchemaVersion 在 validateBase() 里、早于 canonicalRevision 比对，所以永远走不到校验这两个值那一步。若哪天有人把版本判定挪到 digest 比对之后，这两个占位值会让测试立刻变红 —— 那正是应该被发现的顺序回归。",
+  "schemaVersion": 99,
+  "canonicalInputs": [],
+  "canonicalRevision": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "contextGraphDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "authorityRecords": "canonical-facts.json",
+  "activeConstraints": []
+}

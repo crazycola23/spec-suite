@@ -14,6 +14,8 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+
+import { MESSAGES_EN, parseFlagsOrThrow } from '../src/shared/argv.mjs'
 import { pathToFileURL } from 'node:url'
 
 import {
@@ -37,26 +39,23 @@ import {
   validatePolicyFileRules,
 } from './control-plane-common.mjs'
 
+const SPEC = {
+  '--specs-root': { key: 'specsRoot' },
+  '--workspace-root': { key: 'workspaceRoot' },
+  '--graph': { key: 'graph' },
+  '--state': { key: 'state' },
+  '--policy': { key: 'policy' },
+  '--revocations': { key: 'revocations' },
+  '--public-key': { key: 'publicKey' },
+  '--effect': { key: 'effect' },
+  '--lease': { key: 'lease' },
+  '--audit': { key: 'audit' },
+  '--mock-network-log': { key: 'mockNetworkLog' },
+  '--help': { key: 'help', flag: true },
+}
+
 function parseArgs(argv) {
-  const result = {}
-  for (let index = 0; index < argv.length; index++) {
-    switch (argv[index]) {
-      case '--specs-root': result.specsRoot = argv[++index]; break
-      case '--workspace-root': result.workspaceRoot = argv[++index]; break
-      case '--graph': result.graph = argv[++index]; break
-      case '--state': result.state = argv[++index]; break
-      case '--policy': result.policy = argv[++index]; break
-      case '--revocations': result.revocations = argv[++index]; break
-      case '--public-key': result.publicKey = argv[++index]; break
-      case '--effect': result.effect = argv[++index]; break
-      case '--lease': result.lease = argv[++index]; break
-      case '--audit': result.audit = argv[++index]; break
-      case '--mock-network-log': result.mockNetworkLog = argv[++index]; break
-      case '--help': result.help = true; break
-      default: throw new Error(`unknown argument: ${argv[index]}`)
-    }
-  }
-  return result
+  return parseFlagsOrThrow(argv, SPEC, MESSAGES_EN)
 }
 
 const HELP = `Usage: node scripts/enforce-effect.mjs [options]

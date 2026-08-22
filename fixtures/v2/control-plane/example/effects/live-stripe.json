@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "taskId": "task:customer-update",
+  "subject": "agent:harness",
+  "kind": "network.mock.live-stripe",
+  "resource": "mock://live-stripe.local/stripe/customers/cus_demo",
+  "payload": {
+    "customer_id": "cus_demo",
+    "operation": "update"
+  }
+}

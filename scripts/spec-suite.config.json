@@ -1,6 +1,8 @@
 {
   "_comment": "示例 config。拷到规格库根目录后按项目改。字段含义与三个计数陷阱见 SCHEMA.md §5。",
 
+  "schemaVersion": 1,
+
   "dictionaries": [
     "contracts/dictionary.yaml",
     "contracts/errors.yaml",

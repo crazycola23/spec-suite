@@ -1,0 +1,30 @@
+{
+  "contracts": {
+    "errors": [
+      {
+        "class": "business",
+        "code": "E-REFUND-EXPIRED",
+        "details": [
+          "deadline"
+        ],
+        "frontendAction": "manualOnly",
+        "httpStatus": 409,
+        "label": "退款已过截止时间",
+        "source": "BR-REFUND-002"
+      },
+      {
+        "class": "external",
+        "code": "E-RATE-UNAVAILABLE",
+        "details": [
+          "provider"
+        ],
+        "frontendAction": "toast",
+        "httpStatus": 503,
+        "label": "汇率源不可用",
+        "source": "BR-RATE-002"
+      }
+    ]
+  },
+  "schemaVersion": 1,
+  "suite": "frozen-v1"
+}
