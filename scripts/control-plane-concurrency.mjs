@@ -159,6 +159,18 @@ function allDoubleStars(segments, start) {
 export function patternsMayOverlap(left, right) {
   const a = canonicalPathPattern(left, 'left pattern').split('/')
   const b = canonicalPathPattern(right, 'right pattern').split('/')
+
+  // The shared matcher intentionally treats an embedded `**` as an
+  // arbitrary character span, which may cross `/` boundaries.  A
+  // segment-by-segment intersection algorithm cannot model that form without
+  // pretending that the path has extra segments.  Conservatively serialise
+  // such declarations instead of returning a false negative: over-reporting
+  // overlap costs parallelism, while under-reporting it can lose an update.
+  const hasEmbeddedDoubleStar = (segments) => segments.some((segment) => (
+    segment.includes('**') && segment !== '**'
+  ))
+  if (hasEmbeddedDoubleStar(a) || hasEmbeddedDoubleStar(b)) return true
+
   const queue = [[0, 0]]
   const visited = new Set()
   while (queue.length > 0) {

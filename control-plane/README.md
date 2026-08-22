@@ -106,7 +106,7 @@ task 可以额外携带并发字段；没有这些字段的旧 task 保持兼容
 | `writeSet` | 非空的仓库相对 glob 数组 | 合并门检查实际改动的写权限范围 |
 | `subject` / `role` | 可选非空字符串 | 把任务和具体 Agent / 角色绑定到 projection 与 Lease |
 
-`readSet` 与 `writeSet` 必须成对出现。merge gate 还会验证 `baseRevision` 同时是 target 与 Agent head 的祖先；否则返回 `invalid-ancestry` 并拒绝合并。调度器对两个 task 的 `write-write` overlap 直接串行化；`write-read` / `read-write` 可以并行，但读者在写者合并后必须重新投影和验证。glob overlap 判定对 wildcard 采用保守策略：误报只会少并行，漏报会隐藏 lost update，因此不接受“看起来大概不重叠”作为放行理由。
+`readSet` 与 `writeSet` 必须成对出现。merge gate 还会验证 `baseRevision` 同时是 target 与 Agent head 的祖先；否则返回 `invalid-ancestry` 并拒绝合并。它同时检查 Agent 从基线到 head 的完整提交历史，而不是只看最终净 diff；暂时写入后删除的禁区文件，以及 rename 的旧路径和新路径，都仍属于 scope。调度器对两个 task 的 `write-write` overlap 直接串行化；`write-read` / `read-write` 可以并行，但读者在写者合并后必须重新投影和验证。glob overlap 判定对 wildcard 采用保守策略：误报只会少并行，漏报会隐藏 lost update，因此不接受“看起来大概不重叠”作为放行理由。
 
 `readSet` 是 Agent 声明的读取意图，不是工具观测到的实际读操作轨迹。
 
@@ -120,17 +120,21 @@ completed heads into a checked-out, clean target branch and reruns the merge gat
 before every merge. For a `revalidation-required` result whose target changes are
 outside the declared read/write sets, it automatically replays the Agent commit
 range onto the current target in a temporary worktree and reruns the gate. The
-original Agent branch is never rewritten; only a structurally revalidated
-candidate is fast-forwarded. Same-file conflicts, scope failures, and failed
-replays remain blocked.
+original Agent branch is never rewritten (the replay disables `rebase.updateRefs`);
+only a structurally revalidated candidate is fast-forwarded. Apply mode holds an
+atomic lock in Git's common directory for the duration of planning and merging.
+Same-file conflicts, scope failures, and failed replays remain blocked.
 
 The legacy `--allow-declared-disjoint` flag is accepted for compatibility but does
 not authorize a stale merge. If target changes match neither the task's declared
 `readSet` nor `writeSet`, the gate returns `revalidation-required`; the orchestrator's
 default apply path performs structural replay and a second gate evaluation, while
 `--no-auto-revalidate` leaves the result blocked for an external integrator. This
-still relies on declared intent, not observed read tracing, and does not run
-semantic tests automatically; a successful replay must not be treated as proof that
+still relies on declared intent, not observed read tracing. Callers embedding the
+coordinator may pass a synchronous `validateRevalidation` hook; it runs inside the
+temporary candidate worktree and must return `{ status: "passed" }`. A hook that
+fails or dirties that worktree blocks the candidate. Without a hook, semantic tests
+remain `not-run`; a successful structural replay must not be treated as proof that
 the Agent's unreported reads or behavior are correct.
 
 `merge-gate.mjs` 只读 Git 历史，不执行 merge/rebase，也不替 Agent 修改工作树。它的 fast path 要求：

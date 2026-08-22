@@ -58,10 +58,47 @@ function changedFiles(repoRoot, baseSha, headSha, label) {
     'diff',
     '--name-only',
     '-z',
+    '--no-renames',
     '--diff-filter=ACDMRTUXB',
     `${baseSha}..${headSha}`,
   ], label)
   return [...new Set(output.split('\0').filter(Boolean))].sort()
+}
+
+/**
+ * Return every path touched by every commit in base..head.
+ *
+ * The ordinary base..head diff is a final-tree comparison.  That is useful
+ * for merge conflicts, but it lets a branch briefly add a forbidden file and
+ * delete it before the final commit.  Scope is a capability over the whole
+ * submitted history, so the gate also inspects each reachable commit with
+ * rename detection disabled; a rename is therefore checked as both a delete
+ * and an add.
+ */
+function historyChangedFiles(repoRoot, baseSha, headSha, label) {
+  if (baseSha === headSha) return []
+  const commits = git(repoRoot, [
+    'rev-list',
+    '--topo-order',
+    '--reverse',
+    `${baseSha}..${headSha}`,
+  ], `${label} commit range`).trim().split(/\s+/).filter(Boolean)
+  const files = []
+  for (const commit of commits) {
+    const output = git(repoRoot, [
+      'diff-tree',
+      '--root',
+      '--no-commit-id',
+      '--name-only',
+      '-r',
+      '--no-renames',
+      '-z',
+      '--diff-filter=ACDMRTUXB',
+      commit,
+    ], `${label} commit ${commit}`)
+    files.push(...output.split('\0').filter(Boolean))
+  }
+  return [...new Set(files)].sort()
 }
 
 function intersection(left, right) {
@@ -100,9 +137,10 @@ export function evaluateMergeGate({
     'baseRevision is not an ancestor of head ref',
   )
   const agentChangedFiles = changedFiles(repoRoot, base.sha, head.sha, 'Agent diff')
+  const agentHistoryChangedFiles = historyChangedFiles(repoRoot, base.sha, head.sha, 'Agent history')
   const targetChangedFiles = changedFiles(repoRoot, base.sha, target.sha, 'target diff')
   const collisions = intersection(agentChangedFiles, targetChangedFiles)
-  const scopeViolations = findScopeViolations(agentChangedFiles, concurrency.writeSet)
+  const scopeViolations = findScopeViolations(agentHistoryChangedFiles, concurrency.writeSet)
   const targetReadSetOverlaps = targetChangedFiles.filter((file) => readSetCoversPath(file, concurrency.readSet))
   const targetWriteSetOverlaps = targetChangedFiles.filter((file) => writeSetCoversPath(file, concurrency.writeSet))
 
@@ -129,6 +167,7 @@ export function evaluateMergeGate({
     readSet: concurrency.readSet,
     writeSet: concurrency.writeSet,
     changedFiles: agentChangedFiles,
+    historyChangedFiles: agentHistoryChangedFiles,
     targetChangedFiles,
     targetReadSetOverlaps,
     targetWriteSetOverlaps,

@@ -18,6 +18,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
@@ -85,6 +86,69 @@ function resolveCommit(repoRoot, ref, label) {
 
 function revisionSha(revision) {
   return revision.startsWith('git:') ? revision.slice('git:'.length) : revision
+}
+
+function integrationLockPath(repoRoot) {
+  const commonDirectory = git(
+    repoRoot,
+    ['rev-parse', '--git-common-dir'],
+    'integration common directory',
+  )
+  const absoluteCommonDirectory = path.isAbsolute(commonDirectory)
+    ? commonDirectory
+    : path.resolve(repoRoot, commonDirectory)
+  return path.join(absoluteCommonDirectory, 'spec-suite-orchestrate.lock')
+}
+
+/**
+ * Serialize apply-mode coordinators for the repository's shared target.
+ *
+ * The lock lives under Git's common directory rather than in a worktree, so
+ * linked worktrees and separate coordinator processes observe the same guard.
+ * Existing locks are never guessed to be stale: a crashed process therefore
+ * fails closed and leaves an explicit recovery point for an operator.
+ */
+function acquireIntegrationLock(repoRoot, targetRef) {
+  const lockPath = integrationLockPath(repoRoot)
+  const token = randomUUID()
+  let fd = null
+  try {
+    fd = fs.openSync(lockPath, 'wx', 0o600)
+    fs.writeFileSync(fd, `${stableJson({
+      schemaVersion: 1,
+      type: 'spec-suite-orchestration-lock',
+      pid: process.pid,
+      targetRef,
+      token,
+      createdAt: new Date().toISOString(),
+    }, 2)}\n`)
+  } catch (error) {
+    if (fd !== null) {
+      try { fs.closeSync(fd) } catch { /* best effort */ }
+      try { fs.unlinkSync(lockPath) } catch { /* best effort */ }
+    }
+    if (error.code === 'EEXIST') {
+      throw new Error(`target integration lock is already held: ${lockPath}`)
+    }
+    throw new Error(`cannot acquire target integration lock: ${error.message}`)
+  }
+
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    try { fs.closeSync(fd) } catch { /* already closed */ }
+    try {
+      const current = JSON.parse(fs.readFileSync(lockPath, 'utf8'))
+      if (current?.token !== token) {
+        throw new Error('lock owner changed before release')
+      }
+      fs.unlinkSync(lockPath)
+    } catch (error) {
+      if (error.code === 'ENOENT') return
+      throw new Error(`cannot release target integration lock: ${error.message}`)
+    }
+  }
 }
 
 function readManifest(repoRoot, candidate) {
@@ -222,12 +286,72 @@ function mergeHead(repoRoot, headRef) {
  * revision, so a successful result is a real fast-path candidate rather than
  * an exception for the original stale gate.
  *
- * This is intentionally structural revalidation only. It proves that the
- * commit range can be replayed and still satisfies writeSet; it cannot prove
- * an unobserved read that the Agent omitted from readSet or semantic tests
- * that the caller did not provide.
+ * This is intentionally structural revalidation first. It proves that the
+ * commit range can be replayed and still satisfies writeSet. A caller-supplied
+ * validator may add semantic checks, but neither path can prove an unobserved
+ * read that the Agent omitted from readSet.
  */
-function structurallyRevalidateTask({ repoRoot, task, targetRef, headRef }) {
+function semanticValidationResult({ validator, validatorName, repoRoot, integrationRepoRoot, task, candidateTask, targetRevision, candidateHead }) {
+  if (validator === null) {
+    return {
+      status: 'not-run',
+      reason: 'no runtime read trace or caller-supplied semantic validation hook',
+    }
+  }
+
+  const before = git(repoRoot, ['status', '--porcelain=v1', '--untracked-files=all'], 'revalidation worktree status before validator')
+  if (before !== '') throw new Error('revalidation worktree is dirty before semantic validation')
+
+  let outcome
+  try {
+    outcome = validator({
+      repoRoot,
+      integrationRepoRoot,
+      task: candidateTask,
+      originalTask: task,
+      targetRevision,
+      candidateHead,
+    })
+  } catch (error) {
+    return {
+      status: 'failed',
+      validator: validatorName,
+      reason: `validator threw: ${error.message}`,
+    }
+  }
+  if (outcome && typeof outcome.then === 'function') {
+    return {
+      status: 'failed',
+      validator: validatorName,
+      reason: 'validator must be synchronous',
+    }
+  }
+
+  const after = git(repoRoot, ['status', '--porcelain=v1', '--untracked-files=all'], 'revalidation worktree status after validator')
+  if (after !== '') {
+    return {
+      status: 'failed',
+      validator: validatorName,
+      reason: 'validator modified the revalidation worktree',
+    }
+  }
+  if (outcome && typeof outcome === 'object' && outcome.status === 'passed') {
+    return { status: 'passed', validator: validatorName }
+  }
+  const reason = outcome && typeof outcome === 'object' && typeof outcome.reason === 'string'
+    ? outcome.reason
+    : 'validator did not return { status: "passed" }'
+  return { status: 'failed', validator: validatorName, reason }
+}
+
+function structurallyRevalidateTask({
+  repoRoot,
+  task,
+  targetRef,
+  headRef,
+  validator = null,
+  validatorName = 'caller-supplied',
+}) {
   const baseRevision = resolveCommit(repoRoot, task.baseRevision, 'task base revision')
   const targetRevision = resolveCommit(repoRoot, targetRef, 'current target ref')
   const temporaryWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-revalidate-'))
@@ -236,7 +360,10 @@ function structurallyRevalidateTask({ repoRoot, task, targetRef, headRef }) {
     git(repoRoot, ['worktree', 'add', '--detach', temporaryWorktree, revisionSha(headRef)], `create revalidation worktree for ${task.taskId}`)
     worktreeAdded = true
     git(temporaryWorktree, [
+      '-c',
+      'rebase.updateRefs=false',
       'rebase',
+      '--no-update-refs',
       '--onto',
       revisionSha(targetRevision),
       revisionSha(baseRevision),
@@ -253,17 +380,29 @@ function structurallyRevalidateTask({ repoRoot, task, targetRef, headRef }) {
       targetRef,
       headRef: candidateHead,
     })
+    const semanticValidation = gate.safeToMerge
+      ? semanticValidationResult({
+        validator,
+        validatorName,
+        repoRoot: temporaryWorktree,
+        integrationRepoRoot: repoRoot,
+        task,
+        candidateTask,
+        targetRevision,
+        candidateHead,
+      })
+      : {
+        status: 'not-run',
+        reason: 'structural merge gate failed before semantic validation',
+      }
     return {
-      status: gate.safeToMerge ? 'passed' : 'failed',
+      status: gate.safeToMerge && semanticValidation.status !== 'failed' ? 'passed' : 'failed',
       method: 'temporary-worktree-rebase',
       originalBaseRevision: baseRevision,
       targetRevision,
       candidateHead,
       gate,
-      semanticValidation: {
-        status: 'not-run',
-        reason: 'no runtime read trace or caller-supplied semantic validation hook',
-      },
+      semanticValidation,
     }
   } finally {
     if (worktreeAdded) {
@@ -283,8 +422,16 @@ export function integrateCompletedTasks({
   targetRef = 'main',
   allowDeclaredDisjoint = false,
   autoRevalidate = true,
+  validateRevalidation = null,
+  validatorName = 'caller-supplied',
   apply = false,
 } = {}) {
+  if (validateRevalidation !== null && typeof validateRevalidation !== 'function') {
+    throw new Error('validateRevalidation must be a function or null')
+  }
+  if (typeof validatorName !== 'string' || validatorName.trim() === '' || validatorName !== validatorName.trim()) {
+    throw new Error('validatorName must be a non-empty trimmed string')
+  }
   const tasks = normalizeTasks(inputTasks)
   const plan = planTaskBatches(tasks)
   const byId = new Map(tasks.map((task) => [task.taskId, task]))
@@ -294,12 +441,11 @@ export function integrateCompletedTasks({
     apply,
     allowDeclaredDisjoint,
     autoRevalidate,
+    semanticValidator: validateRevalidation === null ? null : validatorName,
     initialTargetRevision: resolveCommit(repoRoot, targetRef, 'target ref'),
     integrations: [],
     blocked: [],
   }
-
-  if (apply) assertApplyWorktree(repoRoot, targetRef)
 
   // A scheduler can be used before Agents have been launched. In that mode a
   // manifest may contain only task contracts; headRef is required only for
@@ -311,83 +457,106 @@ export function integrateCompletedTasks({
     return result
   }
 
-  for (const batch of plan.batches) {
-    for (const taskId of batch) {
-      const task = byId.get(taskId)
-      const headRef = taskHeadRef(task)
-      const gate = evaluateMergeGate({
-        repoRoot,
-        task,
-        targetRef,
-        headRef,
-        allowValidatedDisjoint: allowDeclaredDisjoint,
-      })
-      const entry = { taskId, headRef, gate }
-      if (!gate.safeToMerge) {
-        if (apply && autoRevalidate && gate.status === 'revalidation-required') {
-          try {
-            const revalidation = structurallyRevalidateTask({
-              repoRoot,
-              task,
-              targetRef,
-              headRef,
-            })
-            entry.revalidation = revalidation
-            if (revalidation.gate.safeToMerge) {
-              mergeHead(repoRoot, revalidation.candidateHead)
-              entry.targetRevisionAfterMerge = resolveCommit(repoRoot, targetRef, 'target after revalidation merge')
+  let releaseLock = null
+  try {
+    if (apply) {
+      releaseLock = acquireIntegrationLock(repoRoot, targetRef)
+      assertApplyWorktree(repoRoot, targetRef)
+    }
+
+    for (const batch of plan.batches) {
+      for (const taskId of batch) {
+        const task = byId.get(taskId)
+        const headRef = taskHeadRef(task)
+        const gate = evaluateMergeGate({
+          repoRoot,
+          task,
+          targetRef,
+          headRef,
+          allowValidatedDisjoint: allowDeclaredDisjoint,
+        })
+        const entry = { taskId, headRef, gate }
+        if (!gate.safeToMerge) {
+          const canAutoRevalidate = apply && autoRevalidate && (
+            gate.status === 'revalidation-required'
+            || (
+              gate.status === 'stale-base'
+              && gate.collisions.length === 0
+              && validateRevalidation !== null
+            )
+          )
+          if (canAutoRevalidate) {
+            try {
+              const revalidation = structurallyRevalidateTask({
+                repoRoot,
+                task,
+                targetRef,
+                headRef,
+                validator: validateRevalidation,
+                validatorName,
+              })
+              entry.revalidation = revalidation
+              if (revalidation.status === 'passed' && revalidation.gate.safeToMerge) {
+                mergeHead(repoRoot, revalidation.candidateHead)
+                entry.targetRevisionAfterMerge = resolveCommit(repoRoot, targetRef, 'target after revalidation merge')
+                result.integrations.push(entry)
+                continue
+              }
+              result.blocked.push({
+                taskId,
+                reason: revalidation.semanticValidation.status === 'failed'
+                  ? 'semantic-validation-failed'
+                  : 'revalidation-failed',
+                requiresRebase: revalidation.gate.checks.requiresRebase,
+                requiresRevalidation: revalidation.gate.checks.requiresRevalidation,
+                requiresSemanticValidation: revalidation.semanticValidation.status === 'failed',
+              })
+              result.integrations.push(entry)
+              continue
+            } catch (error) {
+              entry.revalidation = {
+                status: 'failed',
+                method: 'temporary-worktree-rebase',
+                error: error.message,
+                semanticValidation: {
+                  status: 'not-run',
+                  reason: 'structural replay failed before semantic validation',
+                },
+              }
+              result.blocked.push({
+                taskId,
+                reason: 'revalidation-failed',
+                requiresRebase: true,
+                requiresRevalidation: true,
+              })
               result.integrations.push(entry)
               continue
             }
-            result.blocked.push({
-              taskId,
-              reason: 'revalidation-failed',
-              requiresRebase: revalidation.gate.checks.requiresRebase,
-              requiresRevalidation: revalidation.gate.checks.requiresRevalidation,
-            })
-            result.integrations.push(entry)
-            continue
-          } catch (error) {
-            entry.revalidation = {
-              status: 'failed',
-              method: 'temporary-worktree-rebase',
-              error: error.message,
-              semanticValidation: {
-                status: 'not-run',
-                reason: 'structural replay failed before semantic validation',
-              },
-            }
-            result.blocked.push({
-              taskId,
-              reason: 'revalidation-failed',
-              requiresRebase: true,
-              requiresRevalidation: true,
-            })
-            result.integrations.push(entry)
-            continue
           }
+          result.blocked.push({
+            taskId,
+            reason: gate.status,
+            requiresRebase: gate.checks.requiresRebase,
+            requiresRevalidation: gate.checks.requiresRevalidation,
+          })
+          result.integrations.push(entry)
+          continue
         }
-        result.blocked.push({
-          taskId,
-          reason: gate.status,
-          requiresRebase: gate.checks.requiresRebase,
-          requiresRevalidation: gate.checks.requiresRevalidation,
-        })
+        if (apply) {
+          mergeHead(repoRoot, headRef)
+          entry.targetRevisionAfterMerge = resolveCommit(repoRoot, targetRef, 'target after merge')
+        }
         result.integrations.push(entry)
-        continue
       }
-      if (apply) {
-        mergeHead(repoRoot, headRef)
-        entry.targetRevisionAfterMerge = resolveCommit(repoRoot, targetRef, 'target after merge')
-      }
-      result.integrations.push(entry)
     }
-  }
 
-  result.finalTargetRevision = resolveCommit(repoRoot, targetRef, 'final target ref')
-  result.status = result.blocked.length === 0 ? 'completed' : 'blocked'
-  result.resultDigest = jsonDigest(result)
-  return result
+    result.finalTargetRevision = resolveCommit(repoRoot, targetRef, 'final target ref')
+    result.status = result.blocked.length === 0 ? 'completed' : 'blocked'
+    result.resultDigest = jsonDigest(result)
+    return result
+  } finally {
+    if (releaseLock !== null) releaseLock()
+  }
 }
 
 function main() {

@@ -84,7 +84,7 @@ V1 Truth Integrity 保持冻结；新增控制面位于独立的 [`control-plane
 }
 ```
 
-`baseRevision` 是 Agent 开始任务时冻结的 Git commit；`writeSet` 是它允许提交的仓库相对 glob。合并前的 `merge-gate` 会验证这个基线同时是 target 与 Agent head 的祖先，检查实际改动是否越出 `writeSet`、目标分支是否仍停在 `baseRevision`，以及目标分支在这期间是否改过同一文件。目标分支哪怕只发生了无碰撞更新，也会返回 `stale-base` 或 `revalidation-required`，要求先 rebase / 重新投影 / 重新检查，不把旧世界默默当成新世界。
+`baseRevision` 是 Agent 开始任务时冻结的 Git commit；`writeSet` 是它允许提交的仓库相对 glob。合并前的 `merge-gate` 会验证这个基线同时是 target 与 Agent head 的祖先，检查 Agent 从基线以来的完整提交历史（包括 rename 两端）是否越出 `writeSet`、目标分支是否仍停在 `baseRevision`，以及目标分支在这期间是否改过同一文件。目标分支哪怕只发生了无碰撞更新，也会返回 `stale-base` 或 `revalidation-required`，要求先 rebase / 重新投影 / 重新检查，不把旧世界默默当成新世界。
 
 机器合同：merge gate 只在 baseRevision 是 target/head 的共同祖先、target revision 等于 baseRevision、实际改动全在 writeSet 且没有同文件碰撞时放行 fast path。声明的 read/write 集合不重叠只能说明“需要重新验证”，不能直接放行合并。
 
@@ -106,7 +106,7 @@ node scripts/orchestrate.mjs --repo-root . --tasks tasks/batch.json \
   --target-ref main --apply
 ```
 
-`orchestrate` 只负责已完成分支的计划与集成，不启动 Agent、不替 `readSet` 制造观测事实。默认模式只读；`--apply` 要求目标分支已检出且工作树干净。遇到 target 已前进、但没有命中任务声明读写集的 `revalidation-required` 结果时，`--apply` 默认会在临时 worktree 将 Agent 提交重放到最新 target，再重新运行 gate；原 Agent 分支不会被改写，只有新的 candidate 通过 gate 才会 fast-forward。`--no-auto-revalidate` 可保留人工/外部 integrator 接管的阻断行为。这个闭环是结构性 revalidation，不等于运行时 read tracing 或语义测试；结果会明确标记 `semanticValidation: not-run`。旧版的 `--allow-declared-disjoint` 参数仍可被兼容性调用接受，但不再直接授权 stale merge。
+`orchestrate` 只负责已完成分支的计划与集成，不启动 Agent、不替 `readSet` 制造观测事实。默认模式只读；`--apply` 要求目标分支已检出且工作树干净，并在 Git common directory 取得原子协调锁，避免两个 integrator 同时推进同一目标。遇到 target 已前进、但没有命中任务声明读写集的 `revalidation-required` 结果时，`--apply` 默认会在临时 worktree 将 Agent 提交重放到最新 target，再重新运行 gate；rebase 显式禁用 `updateRefs`，原 Agent 分支不会被改写，只有新的 candidate 通过 gate 才会 fast-forward。`--no-auto-revalidate` 可保留人工/外部 integrator 接管的阻断行为。这个闭环是结构性 revalidation，不等于运行时 read tracing 或语义测试；调用方可以通过 `integrateCompletedTasks({ validateRevalidation })` 注入同步语义验证钩子，返回 `{ status: "passed" }` 才算验证通过，否则 candidate 保持 blocked。没有注入钩子时结果会明确标记 `semanticValidation: not-run`。旧版的 `--allow-declared-disjoint` 参数仍可被兼容性调用接受，但不再直接授权 stale merge。
 
 ## 两种模式
 

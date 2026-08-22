@@ -143,12 +143,16 @@ if the integration target advances, the result is stale until it is rebased and 
 again, even when the changed files look disjoint.
 
 Run `node scripts/merge-gate.mjs` before integration. It MUST reject actual changes
-outside `writeSet`, same-file changes made on the target since `baseRevision`, and any
-task that omits the concurrency contract. `role` is descriptive identity metadata; it
-does not replace policy-owned authorization. The gate is read-only: it reports whether a
-fast-path merge is safe and never performs the merge or rebase itself. The orchestrator
-may structurally rebase a `revalidation-required` result in a temporary worktree and
-rerun the gate, but that does not provide runtime read tracing or semantic validation.
+outside `writeSet`, any out-of-scope path touched anywhere in the Agent's submitted
+history (including both sides of a rename), same-file changes made on the target since
+`baseRevision`, and any task that omits the concurrency contract. `role` is descriptive
+identity metadata; it does not replace policy-owned authorization. The gate is
+read-only: it reports whether a fast-path merge is safe and never performs the merge
+or rebase itself. The orchestrator may structurally rebase a `revalidation-required`
+result in a temporary worktree with `rebase.updateRefs` disabled and rerun the gate,
+but that does not provide runtime read tracing or semantic validation. Callers may
+inject a synchronous semantic validator; only an explicit `{ status: "passed" }` may
+clear that validation step.
 
 ## 6. Router
 

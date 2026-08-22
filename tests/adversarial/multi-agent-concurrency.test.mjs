@@ -81,6 +81,7 @@ test('write-set overlap is conservative, while disjoint top-level roots stay par
   assert.equal(patternsMayOverlap('src/frontend/**', 'src/**'), true)
   assert.equal(patternsMayOverlap('src/frontend/**', 'src/frontend/components/**'), true)
   assert.equal(patternsMayOverlap('src/a.js', 'src/b.js'), false)
+  assert.equal(patternsMayOverlap('src/foo**bar', 'src/foo/x/bar'), true)
 
   const relation = analyzeTaskPair(
     task('a'.repeat(40)),
@@ -287,6 +288,50 @@ test('merge gate refuses a result that writes outside its declared scope', () =>
     assert.equal(run.status, 2, `${run.stdout}\n${run.stderr}`)
     const result = JSON.parse(fs.readFileSync(path.join(root, 'gate-result.json'), 'utf8'))
     assert.equal(result.status, 'out-of-scope')
+    assert.deepEqual(result.scopeViolations, ['README.md'])
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('merge gate checks the complete Agent history, not only the final tree', () => {
+  const { root, base } = makeRepo()
+  try {
+    git(root, ['switch', '-q', '-c', 'agent-history'])
+    commitFile(root, 'README.md', '# transient forbidden content\n', 'transient forbidden write')
+    commitFile(root, 'README.md', '# test\n', 'remove transient forbidden write')
+    commitFile(root, 'src/frontend/button.js', 'export const button = 1\n', 'allowed final change')
+
+    const result = evaluateMergeGate({
+      repoRoot: root,
+      task: task(base),
+      targetRef: 'main',
+      headRef: 'agent-history',
+    })
+    assert.equal(result.status, 'out-of-scope')
+    assert.deepEqual(result.changedFiles, ['src/frontend/button.js'])
+    assert.deepEqual(result.historyChangedFiles, ['README.md', 'src/frontend/button.js'])
+    assert.deepEqual(result.scopeViolations, ['README.md'])
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('merge gate treats both sides of an out-of-scope rename as touched history', () => {
+  const { root, base } = makeRepo()
+  try {
+    git(root, ['switch', '-q', '-c', 'agent-rename'])
+    git(root, ['mv', 'README.md', 'src/frontend/renamed.md'])
+    git(root, ['commit', '-q', '-m', 'rename out of scope file'])
+
+    const result = evaluateMergeGate({
+      repoRoot: root,
+      task: task(base),
+      targetRef: 'main',
+      headRef: 'agent-rename',
+    })
+    assert.equal(result.status, 'out-of-scope')
+    assert.deepEqual(result.historyChangedFiles, ['README.md', 'src/frontend/renamed.md'])
     assert.deepEqual(result.scopeViolations, ['README.md'])
   } finally {
     fs.rmSync(root, { recursive: true, force: true })

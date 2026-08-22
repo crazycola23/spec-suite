@@ -102,6 +102,60 @@ test('plan-only orchestration does not require completed Agent refs', () => {
 test('apply structurally revalidates disjoint completed branches without rewriting Agent refs', () => {
   const { root, base } = makeRepo()
   try {
+    git(root, ['config', 'rebase.updateRefs', 'true'])
+    const frontendHead = branchFromBase(root, base, 'agent/frontend', 'src/frontend/button.js', 'export const button = 1\n')
+    const backendHead = branchFromBase(root, base, 'agent/backend', 'src/backend/route.js', 'export const route = 1\n')
+    let validatorCalls = 0
+    const result = integrateCompletedTasks({
+      repoRoot: root,
+      tasks: [
+        task(base, { headRef: frontendHead }),
+        task(base, {
+          taskId: 'task:backend',
+          subject: 'agent:backend-1',
+          role: 'backend-implementer',
+          readSet: ['src/backend/**'],
+          writeSet: ['src/backend/**'],
+          headRef: backendHead,
+        }),
+      ],
+      targetRef: 'main',
+      apply: true,
+      allowDeclaredDisjoint: true,
+      validateRevalidation: ({ repoRoot: candidateRoot, candidateHead }) => {
+        validatorCalls += 1
+        assert.equal(git(candidateRoot, ['status', '--porcelain']), '')
+        assert.ok(fs.existsSync(path.join(candidateRoot, 'src', 'backend', 'route.js')))
+        assert.match(candidateHead, /^git:/)
+        return { status: 'passed' }
+      },
+    })
+    assert.equal(result.status, 'completed')
+    assert.equal(result.integrations.length, 2)
+    assert.deepEqual(result.blocked, [])
+    const revalidated = result.integrations.find((entry) => entry.gate.status === 'revalidation-required')
+    assert.ok(revalidated)
+    assert.equal(revalidated.revalidation.status, 'passed')
+    assert.equal(revalidated.revalidation.method, 'temporary-worktree-rebase')
+    assert.equal(revalidated.revalidation.gate.status, 'ready')
+    assert.deepEqual(revalidated.revalidation.semanticValidation, {
+      status: 'passed',
+      validator: 'caller-supplied',
+    })
+    assert.equal(validatorCalls, 1)
+    assert.equal(git(root, ['rev-parse', 'agent/frontend']), frontendHead)
+    assert.equal(git(root, ['rev-parse', 'agent/backend']), backendHead)
+    assert.equal(fs.existsSync(path.join(root, 'src', 'frontend', 'button.js')), true)
+    assert.equal(fs.existsSync(path.join(root, 'src', 'backend', 'route.js')), true)
+    assert.equal(git(root, ['status', '--porcelain']), '')
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('failed semantic revalidation blocks the candidate after structural replay', () => {
+  const { root, base } = makeRepo()
+  try {
     const frontendHead = branchFromBase(root, base, 'agent/frontend', 'src/frontend/button.js', 'export const button = 1\n')
     const backendHead = branchFromBase(root, base, 'agent/backend', 'src/backend/route.js', 'export const route = 1\n')
     const result = integrateCompletedTasks({
@@ -119,22 +173,104 @@ test('apply structurally revalidates disjoint completed branches without rewriti
       ],
       targetRef: 'main',
       apply: true,
-      allowDeclaredDisjoint: true,
+      validateRevalidation: () => ({ status: 'failed', reason: 'semantic test failed' }),
+    })
+    assert.equal(result.status, 'blocked')
+    assert.deepEqual(result.blocked.map((entry) => entry.reason), ['semantic-validation-failed'])
+    assert.equal(result.integrations[1].revalidation.gate.status, 'ready')
+    assert.deepEqual(result.integrations[1].revalidation.semanticValidation, {
+      status: 'failed',
+      validator: 'caller-supplied',
+      reason: 'semantic test failed',
+    })
+    assert.equal(fs.existsSync(path.join(root, 'src', 'backend', 'route.js')), true)
+    assert.equal(fs.existsSync(path.join(root, 'src', 'frontend', 'button.js')), false)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('read-set staleness can only auto-revalidate with an explicit semantic validator', () => {
+  const { root, base } = makeRepo()
+  try {
+    const backendHead = branchFromBase(root, base, 'agent/backend', 'src/backend/route.js', 'export const route = 1\n')
+    fs.writeFileSync(path.join(root, 'src', 'frontend', 'index.js'), 'export const ui = 2\n')
+    git(root, ['add', 'src/frontend/index.js'])
+    git(root, ['commit', '-q', '-m', 'integrator read-set change'])
+
+    const result = integrateCompletedTasks({
+      repoRoot: root,
+      tasks: [task(base, {
+        taskId: 'task:backend',
+        subject: 'agent:backend-1',
+        role: 'backend-implementer',
+        readSet: ['src/frontend/**'],
+        writeSet: ['src/backend/**'],
+        headRef: backendHead,
+      })],
+      targetRef: 'main',
+      apply: true,
+      validateRevalidation: () => ({ status: 'passed' }),
     })
     assert.equal(result.status, 'completed')
-    assert.equal(result.integrations.length, 2)
-    assert.deepEqual(result.blocked, [])
-    const revalidated = result.integrations.find((entry) => entry.gate.status === 'revalidation-required')
-    assert.ok(revalidated)
-    assert.equal(revalidated.revalidation.status, 'passed')
-    assert.equal(revalidated.revalidation.method, 'temporary-worktree-rebase')
-    assert.equal(revalidated.revalidation.gate.status, 'ready')
-    assert.equal(git(root, ['rev-parse', 'agent/frontend']), frontendHead)
-    assert.equal(git(root, ['rev-parse', 'agent/backend']), backendHead)
-    assert.equal(fs.existsSync(path.join(root, 'src', 'frontend', 'button.js')), true)
+    assert.equal(result.integrations[0].gate.status, 'stale-base')
+    assert.equal(result.integrations[0].revalidation.status, 'passed')
+    assert.equal(fs.readFileSync(path.join(root, 'src', 'frontend', 'index.js'), 'utf8'), 'export const ui = 2\n')
     assert.equal(fs.existsSync(path.join(root, 'src', 'backend', 'route.js')), true)
-    assert.equal(git(root, ['status', '--porcelain']), '')
   } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('apply serializes coordinators with a common-directory lock and releases it on failure', () => {
+  const { root, base } = makeRepo()
+  const lockPath = path.join(root, '.git', 'spec-suite-orchestrate.lock')
+  try {
+    assert.throws(
+      () => integrateCompletedTasks({
+        repoRoot: root,
+        tasks: [task(base)],
+        targetRef: 'main',
+        apply: true,
+      }),
+      /must declare headRef|must declare headRef \(or resultRef\)/,
+    )
+    assert.equal(fs.existsSync(lockPath), false)
+
+    fs.writeFileSync(lockPath, '{"token":"held"}\n')
+    assert.throws(
+      () => integrateCompletedTasks({
+        repoRoot: root,
+        tasks: [task(base, { headRef: 'main' })],
+        targetRef: 'main',
+        apply: true,
+      }),
+      /target integration lock is already held/,
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('the integration lock is shared by linked worktrees', () => {
+  const { root, base } = makeRepo()
+  const linked = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-linked-'))
+  fs.rmSync(linked, { recursive: true, force: true })
+  try {
+    git(root, ['worktree', 'add', '-q', '--detach', linked, base])
+    fs.writeFileSync(path.join(root, '.git', 'spec-suite-orchestrate.lock'), '{"token":"held"}\n')
+    assert.throws(
+      () => integrateCompletedTasks({
+        repoRoot: linked,
+        tasks: [task(base, { headRef: base })],
+        targetRef: 'main',
+        apply: true,
+      }),
+      /target integration lock is already held/,
+    )
+  } finally {
+    try { git(root, ['worktree', 'remove', '--force', linked]) } catch { /* cleanup below */ }
+    fs.rmSync(linked, { recursive: true, force: true })
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
