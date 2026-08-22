@@ -7,6 +7,9 @@ description: >-
   repositories that already adopt spec-suite. Do not bootstrap the full suite
   for an ordinary isolated code change or a single design document; persist the
   unsupported fact with the lightweight unresolved protocol instead.
+compatibility: >-
+  Core workflows require Node.js 22+. Control-plane isolation additionally
+  requires POSIX process identities and filesystem capabilities.
 ---
 
 # Spec Suite
@@ -24,6 +27,18 @@ Use **full mode** when any condition is true:
 
 Otherwise use **lightweight mode**. Do not add the full directory structure just because one retry count, threshold, enum, or price lacks evidence.
 
+For an unfamiliar repository, run the read-only adoption assessment before creating any
+files:
+
+```bash
+node scripts/adopt.mjs --repo-root . --dry-run
+node scripts/adopt.mjs --repo-root . --format json --no-input
+```
+
+The assessment observes existing artifacts, asks only about facts the repository cannot
+prove, and returns `no-op`, `lightweight`, `full`, or `needs-input`. It never creates or
+edits adoption files in this version.
+
 ### Lightweight mode
 
 1. Stop before turning the unknown into a default.
@@ -32,6 +47,20 @@ Otherwise use **lightweight mode**. Do not add the full directory structure just
 4. Persist the fact in `.spec-suite/unresolved.yaml`; `sourceSearch` records search actions, not proof that no source exists.
 5. Guard repeated work with `guard-unresolved-fact.mjs`. Exit code 3 means the action remains blocked.
 6. If the project later adopts full mode, migrate the same fact once with `migrate-unresolved.mjs`; preserve provenance and reuse the same `G-*` on repeated migration.
+
+### Trigger evaluation
+
+Skill discovery and mode routing are evaluated separately. The corpus and adapter protocol
+live under `evals/trigger/`:
+
+```bash
+node scripts/eval-trigger.mjs --validate
+node scripts/eval-trigger.mjs --adapter <node-adapter>
+```
+
+Discovery receives only `name + description`; routing receives the full `SKILL.md`. A
+critical mismatch fails the eval, while exploratory cases are reported without inventing
+an accuracy threshold.
 
 Template: `templates/lightweight/unresolved.yaml`.
 

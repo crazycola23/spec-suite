@@ -8,7 +8,9 @@
     "test": "node --test tests/*/*.test.mjs",
     "arch": "node scripts/check-architecture.mjs",
     "docs": "node scripts/render-docs.mjs",
-    "trust-report": "node scripts/trust-report.mjs"
+    "trust-report": "node scripts/trust-report.mjs",
+    "adopt": "node scripts/adopt.mjs",
+    "eval:trigger": "node scripts/eval-trigger.mjs"
   },
   "license": "ISC",
   "devDependencies": {

@@ -15,7 +15,8 @@
 //
 // 后续 `src/truth/adapters/zones.mjs` 也复用这一谓词，保证 config 声明的
 // `AGENTS.md` / `CLAUDE.md` adapter 路径不能逃出 specs root；它不是上表
-// “合并前重复实现”的一员，而是合并后新增的第 7 个 importer。
+// “合并前重复实现”的一员，而是合并后新增的 importer。只读 adoption inspection
+// 也复用它来拒绝 config 声明的越界路径；这同样不是一份新判定。
 //
 // 最后两行是这次合并最值得做的理由：仓库同时依赖这个判定的**两个方向** ——
 // 「不许逃出规格库」与「必须落在 agent workspace 之外」。它们过去是两份各自

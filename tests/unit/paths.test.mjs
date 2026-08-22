@@ -293,7 +293,7 @@ test('全仓库只有一处写出这个谓词', () => {
   )
 })
 
-test('导入方恰好是这 7 个文件', () => {
+test('导入方恰好是这 8 个文件', () => {
   // 反向锁。数量本身不是目的 —— 它是"有人新写了一处容纳判定"与"有人复用了
   // 这一处"的区分器：前者会让上一条测试变红，后者会让这一条变红。两条都红说明
   // 有人抄了一份**并且**没有复用；只有这一条红说明扩散是正当的，改这里的清单即可。
@@ -308,6 +308,7 @@ test('导入方恰好是这 7 个文件', () => {
     'scripts/guard-unresolved-fact.mjs',
     'scripts/lease-issuer.mjs',
     'scripts/verify-consumer-contracts.mjs',
+    'src/adoption/inspect.mjs',
     'src/truth/adapters/zones.mjs',
   ])
 })

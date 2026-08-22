@@ -8,6 +8,29 @@
 - **Canonical stays canonical**：共同纪律与业务契约只有一个 canonical source；adapter、bundle、manifest 和消费副本都没有裁决权。
 - **Derived stays reproducible**：相同输入确定性地产生相同的 Agent adapter、language-neutral bundle 和 consumer 验证结果。
 
+## P0 onboarding 与 trigger eval
+
+面对陌生仓库时，当前版本的 adoption assessment 全程只读：
+
+```bash
+node scripts/adopt.mjs --repo-root . --dry-run
+node scripts/adopt.mjs --repo-root . --format json --no-input
+```
+
+它只报告可观察 artifact，把未知回答保持为 `unknown`，并推荐 `no-op`、`lightweight`、
+`full` 或 `needs-input`；不会创建 `L0`、`CLAUDE.md`、`AGENTS.md` 或
+`.spec-suite/unresolved.yaml`。
+
+trigger eval 把 skill discovery 与 mode routing 分开。可以只验证签入的 corpus，
+也可以接入任何遵守 stdin/stdout 协议的外部 Node adapter：
+
+```bash
+node scripts/eval-trigger.mjs --validate
+node scripts/eval-trigger.mjs --adapter ./path/to/adapter.mjs
+```
+
+adapter run 的绿灯只证明「这份 corpus × 这个 adapter/model」的结果，不证明所有宿主或模型都会同样触发。
+
 ## V1 已实现的纵切片
 
 ```text
@@ -92,7 +115,7 @@ generator 是 fail-closed：canonical input 缺失、无法解析、source 指�
 
 代码 —— 分层，方向由 `npm run arch` 每次强制：
 
-- [`src/`](./src/)：库代码。`shared/`（与产品层无关的叶子：文本、glob、遍历、canonical JSON、原子写、argv、版本策略）、`truth/`（V1 的字典、模型、schema 规则、ID 引用、投影、两区制、诊断）、`truth/cli/`（argv 解析与输出渲染；它**返回** exit code，不自己 exit）。
+- [`src/`](./src/)：库代码。`shared/`（与产品层无关的叶子：文本、glob、遍历、canonical JSON、原子写、argv、版本策略）、`adoption/`（只读仓库观察与 mode recommendation，不依赖 Truth/Control）、`truth/`（V1 的字典、模型、schema 规则、ID 引用、投影、两区制、诊断）、`truth/cli/`（argv 解析与输出渲染；它**返回** exit code，不自己 exit）。
 - [`src/layers.mjs`](./src/layers.mjs)：allowed-edge 的声明式清单。未归类的文件是违规，不是默认放行。
 - [`scripts/`](./scripts/)：CLI 入口、V2 daemon、检查与报告工具，以及 `fixtures/v1-vertical-slice/` —— 纵切集成测试 spawn 的那棵夹具，它跟随 HEAD，与冻结的 [`fixtures/`](./fixtures/) 是两回事。`check-spec-suite.mjs` 是 facade：逐名 re-export `src/` 的公开面并持有 CLI guard，所以既有的 import 路径与 flag 都没变。库代码一律返回值或抛异常，**进程退出码只在这一层决定**。
 - [`registry/invariants.mjs`](./registry/invariants.mjs)：规则的机器可读单一真相源。`CHECK_NAMES` 与可生成的文档表格都从它派生，每条记录必填「这条规则**没有**证明什么」。
@@ -113,7 +136,7 @@ npm run docs -- --check               # 文档生成区与 registry 的漂移检
 npm run trust-report -- --format md   # 每条规则「没有证明什么」（也可 json）
 ```
 
-测试覆盖幂等迁移、重复任务保持 unresolved、双 adapter 同源投影、声明路径 fail-closed、平台手写区保护、确定性生成、三类 V1 fail-closed 路径、consumer 副本校验，以及 V2 的 trust-root 注入、self-authorization、Lease tampering/replay/expiry/revocation、G-17 bypass、protected/baseline overlap、symlink escape、classifier/audit failure 和 denial provenance。
+测试覆盖只读 adoption recommendation、trigger corpus/adapter 协议、幂等迁移、重复任务保持 unresolved、双 adapter 同源投影、声明路径 fail-closed、平台手写区保护、确定性生成、三类 V1 fail-closed 路径、consumer 副本校验，以及 V2 的 trust-root 注入、self-authorization、Lease tampering/replay/expiry/revocation、G-17 bypass、protected/baseline overlap、symlink escape、classifier/audit failure 和 denial provenance。
 
 `npm run arch` 强制四件事：import 图无环；每条跨层边符合 `src/layers.mjs` 的声明；每个 `.mjs` 都有归属层（未归类 = 违规）；**没有绕过 import 图的动态加载**。第四条堵的是前三条共同的前提 —— 静态扫描看不见 `import(expr)` 与 `createRequire()`，所以在加上它之前，任何被层策略禁止的边只要改写成动态形式就能全程绿灯通过。字面量 `import('./x.mjs')` 被收成图里的真实边照常受约束；无法静态分析的形态默认违规，只有 `DYNAMIC_LOAD_EXEMPTIONS` 里按 `(文件, 形态)` 登记的放行，而**用不上的豁免同样是违规** —— 这样检测器若无声失效，豁免会一起变红而不是安静全绿。
 

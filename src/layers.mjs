@@ -56,13 +56,14 @@ export const LAYERS = {
   policy: { allow: [], role: '分层策略自身。叶子，不 import 任何模块' },
   registry: { allow: [], role: 'invariant/check registry：纯声明数据与纯查询函数。叶子' },
   shared: { allow: ['shared'], role: '与产品层无关的工具：文本、glob、遍历、版本策略' },
+  adoption: { allow: ['adoption', 'shared'], role: '只读 adoption inspection 与 mode recommendation；不依赖 Truth/Control' },
   migrations: { allow: ['shared'], role: 'schema 迁移注册表与实现' },
   truth: { allow: ['truth', 'shared', 'registry'], role: 'V1 Truth Integrity：字典、模型、检查规则、投影、两区制' },
   'truth-cli': { allow: ['truth', 'shared'], role: 'V1 的 argv 解析与输出渲染。是库：返回 exit code，不 process.exit' },
   control: { allow: ['control', 'truth', 'shared'], role: 'V2 Control Plane：lease、effect、context projection、IPC、trust' },
   facade: { allow: ['truth-cli', 'truth', 'shared'], role: '唯一的库门面 scripts/check-spec-suite.mjs（D1：30 个导出名已冻结）' },
-  cli: { allow: ['facade', 'control', 'truth', 'shared', 'migrations', 'policy', 'registry'], role: '入口脚本：持有 exit code，互相之间不得 import' },
-  test: { allow: ['test', 'cli', 'facade', 'control', 'truth-cli', 'truth', 'shared', 'migrations', 'policy', 'registry'], role: '测试。可以看任何层' },
+  cli: { allow: ['facade', 'control', 'truth', 'shared', 'adoption', 'migrations', 'policy', 'registry'], role: '入口脚本：持有 exit code，互相之间不得 import' },
+  test: { allow: ['test', 'cli', 'facade', 'control', 'truth-cli', 'truth', 'shared', 'adoption', 'migrations', 'policy', 'registry'], role: '测试。可以看任何层' },
 }
 
 /**
@@ -79,6 +80,7 @@ export const FILE_LAYERS = [
   { match: 'src/layers.mjs', layer: 'policy' },
   { match: 'registry/', layer: 'registry' },
   { match: 'src/shared/', layer: 'shared' },
+  { match: 'src/adoption/', layer: 'adoption' },
   // src/truth/cli/ 必须单独归类，且**不是** cli 层：它是库（返回 exit code，
   // 不 process.exit），只被 facade 消费。最长前缀优先保证它不会被
   // src/truth/ 这条更短的规则吃掉。
@@ -108,6 +110,8 @@ export const FILE_LAYERS = [
   { match: 'scripts/check-architecture.mjs', layer: 'cli' },
   { match: 'scripts/render-docs.mjs', layer: 'cli' },
   { match: 'scripts/trust-report.mjs', layer: 'cli' },
+  { match: 'scripts/adopt.mjs', layer: 'cli' },
+  { match: 'scripts/eval-trigger.mjs', layer: 'cli' },
 ]
 
 /** 测试文件按后缀归类，与目录无关。 */
