@@ -7,7 +7,8 @@
   "scripts": {
     "test": "node --test scripts/*.test.mjs",
     "arch": "node scripts/check-architecture.mjs",
-    "docs": "node scripts/render-docs.mjs"
+    "docs": "node scripts/render-docs.mjs",
+    "trust-report": "node scripts/trust-report.mjs"
   },
   "license": "ISC",
   "devDependencies": {

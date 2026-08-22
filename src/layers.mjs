@@ -107,6 +107,7 @@ export const FILE_LAYERS = [
   { match: 'scripts/verify-consumer-contracts.mjs', layer: 'cli' },
   { match: 'scripts/check-architecture.mjs', layer: 'cli' },
   { match: 'scripts/render-docs.mjs', layer: 'cli' },
+  { match: 'scripts/trust-report.mjs', layer: 'cli' },
 ]
 
 /** 测试文件按后缀归类，与目录无关。 */

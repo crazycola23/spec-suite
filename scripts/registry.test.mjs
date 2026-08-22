@@ -17,8 +17,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  CHECKS, ENFORCEMENT, INVARIANTS,
-  checkById, checkIds, checkNames, invariantsOfKind, validateRegistry,
+  CHECKS, DEFAULT_SCHEMA_KIND, ENFORCEMENT, INVARIANTS,
+  checkById, checkIds, checkNames, groupByEnforcement, invariantsOfKind, validateRegistry,
 } from '../registry/invariants.mjs'
 import { SCHEMA_POLICY } from '../src/shared/schema-version.mjs'
 import { blankComments } from './check-architecture.mjs'
@@ -207,18 +207,71 @@ test('ENFORCEMENT 恰好是四分法，取值冻结', () => {
   for (const v of used) assert.ok(Object.values(ENFORCEMENT).includes(v), `用了四分法之外的取值：${v}`)
 })
 
-test('registry 声明的 schemaVersion 不超过 dictionary 的 current', () => {
-  const current = SCHEMA_POLICY.dictionary.current
+test('registry 声明的 schemaVersion 不超过它那类 artifact 的 current', () => {
+  // 按 schemaKind 分别比对，不是一律拿 dictionary 的 current 当上限：V2 记录
+  // 用的是 control-plane-document，两类将来会各自演进。写死一类会让另一类的
+  // 越界声明从这条断言里溜过去。
   for (const r of INVARIANTS) {
+    const kind = r.schemaKind ?? DEFAULT_SCHEMA_KIND
+    const policy = SCHEMA_POLICY[kind]
+    assert.ok(
+      policy,
+      `${r.id} 的 schemaKind \`${kind}\` 不在 SCHEMA_POLICY 里 —— `
+      + `registry 不能为不存在的 artifact 类别声明规则`,
+    )
     for (const v of r.schemaVersions) {
       assert.ok(Number.isInteger(v) && v >= 1, `${r.id} 的 schemaVersions 含非法值：${v}`)
       assert.ok(
-        v <= current,
-        `${r.id} 声称适用于 schemaVersion ${v}，但工具当前的 dictionary schema 只到 ${current} —— `
+        v <= policy.current,
+        `${r.id} 声称适用于 ${kind} schemaVersion ${v}，但工具当前只到 ${policy.current} —— `
         + `不为还不存在的版本预先声明规则（那就是 invent unknown fact）`,
       )
     }
   }
+})
+
+test('四分法分组是划分：不重、不漏、无 unclassified', () => {
+  // trust-report 直接消费这个分组。少一条会让某条规则从报告里静默消失，
+  // 而报告的读者没有任何办法察觉 —— 所以在 registry 侧也锁一次。
+  const { groups, unclassified } = groupByEnforcement()
+  assert.deepEqual(unclassified, [], '有记录落在四分法之外，它会从 trust-report 的每一节里消失')
+  assert.deepEqual(
+    Object.keys(groups).sort(), Object.values(ENFORCEMENT).slice().sort(),
+    '分组的键必须恒定是四类 —— 空类别本身就是信息，不能被省略',
+  )
+  const total = Object.values(groups).reduce((n, g) => n + g.length, 0)
+  assert.equal(total, INVARIANTS.length)
+  const ids = Object.values(groups).flat().map((r) => r.id)
+  assert.equal(new Set(ids).size, ids.length, 'id 不得跨组重复')
+})
+
+test('每条记录都写了 residualRisk，且不是敷衍占位', () => {
+  // 这是 registry 携带的、别处不存在的信息：代码说自己做了什么，从不说
+  // 自己**没**做什么。允许占位就等于允许把这一列糊过去。
+  const cheap = new Set(['无', '没有', '暂无', '待补', 'TODO', 'TBD', 'N/A', '-', '—'])
+  const lazy = INVARIANTS.filter(
+    (r) => typeof r.residualRisk !== 'string'
+      || cheap.has(r.residualRisk.trim())
+      || r.residualRisk.trim().length < 8,
+  )
+  assert.deepEqual(
+    lazy.map((r) => r.id), [],
+    '写不出残余风险通常意味着还没核对过强制点，而不是意味着风险为零',
+  )
+})
+
+test('每条记录的 docRefs 指向真实存在的文件', () => {
+  const missing = []
+  for (const r of INVARIANTS) {
+    for (const ref of r.docRefs) {
+      // docRefs 的形状是 `<文件> <小节>`，例如 `SCHEMA.md §1`、
+      // `control-plane/README.md Isolated daemon boundary`。取第一个空白前的
+      // token 当路径；`#anchor` / `:line` 后缀一并剥掉。
+      const file = ref.split(/\s+/)[0].split('#')[0].split(':')[0]
+      if (!fs.existsSync(path.join(REPO, file))) missing.push(`${r.id} → ${file}`)
+    }
+  }
+  assert.deepEqual(missing, [], 'docRefs 悬空 —— 引用不存在的文档等于没有 docRefs')
 })
 
 // ---------------------------------------------------------------------------
@@ -228,7 +281,8 @@ test('registry 声明的 schemaVersion 不超过 dictionary 的 current', () => 
 const OK = {
   id: 'X-OK', kind: 'invariant', title: 't', statement: 's',
   severity: 'error', schemaVersions: [1],
-  enforcement: ENFORCEMENT.MACHINE, checks: [1], docRefs: ['README.md'],
+  enforcement: ENFORCEMENT.MACHINE, checks: [1],
+  residualRisk: '这条 fixture 的残余风险占位', docRefs: ['README.md'],
 }
 const has = (problems, needle) => problems.some((p) => p.includes(needle))
 
@@ -266,6 +320,20 @@ test('校验器拦下：指向不存在的 check、重复 id、四分法之外�
   assert.ok(has(validateRegistry([{ ...OK, docRefs: [] }], CHECKS), '没有 docRefs'))
   assert.ok(has(validateRegistry([{ ...OK, statement: '  ' }], CHECKS), 'statement 为空'))
   assert.ok(has(validateRegistry([{ ...OK, schemaVersions: [] }], CHECKS), '没有声明适用的 schemaVersions'))
+})
+
+test('校验器拦下：缺 residualRisk 或写成空白', () => {
+  // residualRisk 是必填的，理由见 registry 文件头：一份只复述规则的 registry
+  // 迟早变成第 N 份副本。这条断言保证"没写"会被拦下，而不是渲染成空白单元格。
+  for (const bad of [{}, { residualRisk: '' }, { residualRisk: '   ' }, { residualRisk: null }]) {
+    const r = { ...OK, ...bad }
+    if (!('residualRisk' in bad)) delete r.residualRisk
+    assert.ok(has(validateRegistry([r], CHECKS), '缺 residualRisk'), JSON.stringify(bad))
+  }
+})
+
+test('校验器拦下：schemaKind 写成空字符串', () => {
+  assert.ok(has(validateRegistry([{ ...OK, schemaKind: '' }], CHECKS), 'schemaKind 不是非空字符串'))
 })
 
 test('校验器拦下坏 CHECKS：缺实现模块、id 重复', () => {
