@@ -8,6 +8,7 @@
     "test": "node --test tests/*/*.test.mjs",
     "arch": "node scripts/check-architecture.mjs",
     "merge-gate": "node scripts/merge-gate.mjs",
+    "orchestrate": "node scripts/orchestrate.mjs",
     "docs": "node scripts/render-docs.mjs",
     "trust-report": "node scripts/trust-report.mjs",
     "adopt": "node scripts/adopt.mjs",

@@ -98,6 +98,16 @@ node scripts/merge-gate.mjs \
 
 退出码 `0` 只表示当前 revision 上可以走 fast path；`2` 表示需要串行化、rebase 或处理越界写入；`1` 表示任务或仓库输入本身不可用。旧 task 没有并发字段时仍能用于现有 projection/Lease 流程，但不能通过这个 merge gate —— 未声明不等于安全。
 
+当外部 Agent harness 已经产出多个 `headRef` 后，可以让集成器按声明式读写集自动分批，并在每次合并前重新运行 gate：
+
+```bash
+node scripts/orchestrate.mjs --repo-root . --tasks tasks/batch.json
+node scripts/orchestrate.mjs --repo-root . --tasks tasks/batch.json \
+  --target-ref main --apply --allow-declared-disjoint
+```
+
+`orchestrate` 只负责已完成分支的计划与集成，不启动 Agent、不替 `readSet` 制造观测事实。默认模式只读；`--apply` 要求目标分支已检出且工作树干净。`--allow-declared-disjoint` 是显式放宽：只有目标期间的改动同时不匹配当前任务的 `readSet` 与 `writeSet` 才允许合并，其他 stale 结果仍停下并报告需要 rebase / 重新投影 / 重新验证。
+
 ## 两种模式
 
 **轻量模式**适用于普通仓库里的单个无依据事实。只创建 `.spec-suite/unresolved.yaml`，不引入完整规格基础设施。若项目以后采用 spec-suite，同一事实可单向、幂等升级为一个 `G-*`。

@@ -196,6 +196,11 @@ export function writeSetCoversPath(file, writeSet) {
   return matchesAny(file, writeSet)
 }
 
+export function readSetCoversPath(file, readSet) {
+  if (typeof file !== 'string' || file.trim() === '') return false
+  return matchesAny(file, readSet)
+}
+
 export function findScopeViolations(files, writeSet) {
   return [...new Set(files)]
     .filter((file) => !writeSetCoversPath(file, writeSet))

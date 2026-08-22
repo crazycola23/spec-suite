@@ -110,6 +110,20 @@ task 可以额外携带并发字段；没有这些字段的旧 task 保持兼容
 
 `readSet` 是 Agent 声明的读取意图，不是工具观测到的实际读操作轨迹。
 
+## Integration coordinator
+
+`node scripts/orchestrate.mjs --tasks <manifest>` consumes completed Agent branches
+(`headRef`) and emits a deterministic conflict graph plus greedy execution batches.
+Write-write overlap serializes tasks; read/write overlap remains a post-merge
+revalidation obligation. The command does not launch Agents. `--apply` integrates
+completed heads into a checked-out, clean target branch and reruns the merge gate
+before every merge. It fails closed on stale, conflicting, or out-of-scope results.
+
+`--allow-declared-disjoint` enables an explicit validated-disjoint path for target
+changes that match neither the task's declared `readSet` nor `writeSet`. This is
+still based on declared intent, not observed read tracing, and the result records
+that distinction; it must not be treated as a runtime capability grant.
+
 `merge-gate.mjs` 只读 Git 历史，不执行 merge/rebase，也不替 Agent 修改工作树。它的 fast path 要求：
 
 1. `targetRef == baseRevision`；
