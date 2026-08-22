@@ -303,12 +303,34 @@ test('发布的 L0 example adapter 与 bundle 是 canonical inputs 的当前字�
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-example-'))
   fs.cpSync(source, root, { recursive: true })
   const config = path.join(root, 'spec-suite.config.json')
+  const entry = path.join(root, 'CLAUDE.md')
   const tracked = [
-    path.join(root, 'CLAUDE.md'),
+    entry,
     path.join(root, 'generated', 'contract-bundle.json'),
     path.join(root, 'generated', 'manifest.json'),
   ]
   const before = tracked.map((file) => fs.readFileSync(file))
+  const entryBefore = fs.readFileSync(entry)
+
+  // 先把派生物清掉，再重新派生。不清掉的话，「两个工具都退化成 no-op」这类缺陷
+  // 会让下面的比对**空过**：文件还是 cpSync 复制进来的那份字节，逐字节相等，
+  // 绿灯。`fixed.status === 0` 只证明检查器没报错，不证明它写过任何东西。
+  // compatibility.test.mjs 的同类断言一直是先删再生成（那里写着「先删掉，否则
+  // 『没重新生成』也能让下面的比对通过 —— 那种绿灯什么也不证明」），这条漏了
+  // 同一道防线。
+  //
+  // 两类派生物要分开处理：generated/ 整个删掉；CLAUDE.md **不能**删 —— 生成区
+  // 寄生在一份手写文档里，删掉整份文件等于连宿主一起删。所以只清空生成区的正文、
+  // 留下 BEGIN/END 标记，逼重写器把它填回来。
+  fs.rmSync(path.join(root, 'generated'), { recursive: true, force: true })
+  const zoneBody = /(<!-- BEGIN GENERATED: agent-entry\.common -->\n)[\s\S]*?(<!-- END GENERATED: agent-entry\.common -->)/
+  fs.writeFileSync(entry, fs.readFileSync(entry, 'utf8').replace(zoneBody, '$1$2'), 'utf8')
+
+  // 清空动作自己也要被证明：一个没匹配上的正则会静默什么都不改，于是「先删」
+  // 这道防线自己空掉，而测试照样绿 —— 那正是这次要堵的形状，不能在堵它的路上
+  // 重新引入一遍。
+  assert.equal(fs.existsSync(path.join(root, 'generated')), false)
+  assert.notDeepEqual(fs.readFileSync(entry), entryBefore, '生成区没被清空 —— 「先删」这道防线正在空过')
 
   const fixed = runCli('check-spec-suite.mjs', [
     '--specs-root', root,
