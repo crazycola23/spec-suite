@@ -13,6 +13,11 @@ import { pathToFileURL } from 'node:url'
 
 import { MESSAGES_ZH, parseFlagsOrThrow } from '../src/shared/argv.mjs'
 import { writeFilesAtomic } from '../src/shared/atomic-write.mjs'
+// canonicalize 从这里来，而不再是本文件下方的一份局部实现（D4）。两份实现的差别
+// 只有一处：本文件那份对非 JSON 值**静默放行**，于是 `undefined` / 函数 / symbol
+// 会被随后的 JSON.stringify 悄悄丢掉 —— 字段从 bundle 里消失，而 manifest 的
+// digest 照样自洽。合法输入的输出逐字节不变，收紧只影响以前被静默丢弃的输入。
+import { canonicalize } from '../src/shared/canonical-json.mjs'
 import { extractIdTokens, loadYamlLib, readText, run, toPosix } from './check-spec-suite.mjs'
 
 const SPEC = {
@@ -51,13 +56,6 @@ function isInside(parent, child) {
   return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel))
 }
 
-function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize)
-  if (!value || typeof value !== 'object') return value
-  return Object.fromEntries(
-    Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]),
-  )
-}
 
 function validateSources({ contracts, config, defs, generatedRoot, specsRoot }) {
   const problems = []

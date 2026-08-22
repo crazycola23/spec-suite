@@ -2,20 +2,13 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { canonicalize, stableJson } from '../src/shared/canonical-json.mjs'
 import { assertSchemaVersion as assertSchemaVersionPolicy } from '../src/shared/schema-version.mjs'
 
-export function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize)
-  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return value
-  if (!value || typeof value !== 'object') throw new Error(`value is not JSON-serializable: ${typeof value}`)
-  return Object.fromEntries(
-    Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]),
-  )
-}
-
-export function stableJson(value, space = 0) {
-  return JSON.stringify(canonicalize(value), null, space)
-}
+// 这两个名字继续从本模块导出：enforce-effect / lease-issuer / project-context /
+// control-plane-ipc / v2-control-plane.test 都按 `./control-plane-common.mjs`
+// import 它们。实现搬走了，导入路径不动 —— 否则这次合并会变成一次 V2 改动。
+export { canonicalize, stableJson }
 
 export function jsonDigest(value) {
   return `sha256:${crypto.createHash('sha256').update(stableJson(value)).digest('hex')}`
