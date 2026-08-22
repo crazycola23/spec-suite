@@ -27,6 +27,10 @@ import {
   stringSet,
   toPosix,
 } from './control-plane-common.mjs'
+import {
+  projectionConcurrencyFields,
+  validateTaskConcurrency,
+} from './control-plane-concurrency.mjs'
 import { writeFileAtomic } from '../src/shared/atomic-write.mjs'
 
 const NODE_KINDS = new Set(['kernel', 'file', 'fact', 'gap', 'contract', 'action', 'provider', 'permission'])
@@ -91,6 +95,7 @@ function validateBase({ graph, task, state, policy }, reasons) {
   assertSchemaVersion(state, 'canonical state')
   assertSchemaVersion(policy, 'issuer policy')
   if (typeof task.taskId !== 'string' || task.taskId.trim() === '') throw new Error('task.taskId must be non-empty')
+  validateTaskConcurrency(task)
   if (typeof state.canonicalRevision !== 'string' || state.canonicalRevision.trim() === '') {
     throw new Error('canonical state revision is unavailable')
   }
@@ -265,6 +270,8 @@ export function projectContext(options = {}) {
     leaseEligible: uncertaintyReasons.length === 0,
     privilegeCeiling: uncertaintyReasons.length === 0 ? 'issuer-policy-only' : 'none',
   }
+  const concurrency = projectionConcurrencyFields(task)
+  if (concurrency) Object.assign(projection, concurrency)
   projection.projectionDigest = jsonDigest(projection)
   return projection
 }

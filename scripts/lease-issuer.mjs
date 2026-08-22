@@ -34,6 +34,10 @@ import { MESSAGES_EN, parseFlagsOrThrow } from '../src/shared/argv.mjs'
 import { writeFileAtomic } from '../src/shared/atomic-write.mjs'
 import { isInside } from '../src/shared/paths.mjs'
 import { projectContext } from './project-context.mjs'
+import {
+  projectionConcurrencyFields,
+  validateTaskConcurrency,
+} from './control-plane-concurrency.mjs'
 
 const SPEC = {
   '--specs-root': { key: 'specsRoot' },
@@ -189,7 +193,7 @@ function validateProjection({ supplied, recomputed, state, policy, scope }) {
 export function issueLeaseFromTrustedInputs({
   specsRoot: configuredRoot,
   graph,
-  task,
+  task: taskPath,
   state: statePath,
   policy: policyPath,
   privateKey,
@@ -198,24 +202,29 @@ export function issueLeaseFromTrustedInputs({
   now = Date.now(),
 }) {
   const specsRoot = path.resolve(configuredRoot ?? '.')
-  for (const [key, value] of Object.entries({ graph, task, state: statePath, policy: policyPath })) {
+  for (const [key, value] of Object.entries({ graph, task: taskPath, state: statePath, policy: policyPath })) {
     if (!value) throw new Error(`trusted ${key} path is unavailable`)
   }
-  const inputs = Object.fromEntries(Object.entries({ graph, task, state: statePath, policy: policyPath }).map(([key, value]) => [
+  const inputs = Object.fromEntries(Object.entries({ graph, task: taskPath, state: statePath, policy: policyPath }).map(([key, value]) => [
     key,
     resolveInside(specsRoot, value, `trusted ${key} path`),
   ]))
+  const taskDocument = readJson(inputs.task, 'task')
   const state = readJson(inputs.state, 'canonical state')
   const policy = readJson(inputs.policy, 'issuer policy')
   assertSchemaVersion(state, 'canonical state')
+  const taskConcurrency = validateTaskConcurrency(taskDocument)
   const requestedEffects = validateRequest(request)
   const { scope, allowedEffects } = validatePolicy(policy, request.taskId, request.subject)
+  if (taskConcurrency.subject !== null && taskConcurrency.subject !== request.subject) {
+    throw new Error('request subject does not match the task concurrency subject')
+  }
   if (request.ttlSeconds > policy.maxTtlSeconds) throw new Error('requested TTL exceeds issuer policy')
 
   const recomputed = projectContext({
     specsRoot,
     graph,
-    task,
+    task: taskPath,
     state: statePath,
     policy: policyPath,
   })
@@ -250,6 +259,17 @@ export function issueLeaseFromTrustedInputs({
     activeConstraints: stringSet(state.activeConstraints ?? [], 'canonical active constraints'),
     permissions: [...new Set(effects.map((effect) => effect.permission))].sort(),
     allowedEffects: effects,
+  }
+  const concurrency = projectionConcurrencyFields(taskDocument)
+  if (concurrency) {
+    // The signed lease carries the task's concurrency contract so a consumer
+    // does not have to trust an out-of-band task file after issuance.
+    Object.assign(payload, {
+      baseRevision: concurrency.baseRevision,
+      readSet: concurrency.readSet,
+      role: concurrency.role,
+      writeSet: concurrency.writeSet,
+    })
   }
   const signature = crypto.sign(null, Buffer.from(stableJson(payload)), signingKey).toString('base64url')
   return {

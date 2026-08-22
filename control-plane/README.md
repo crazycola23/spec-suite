@@ -95,6 +95,29 @@ Control Plane effect 类型暂停扩大：现有 3 类（`file.write`、`network
 
 它不证明 semantic graph completeness：`complete: true` 仍是受信声明。如果有人删除 edge、同步更新 digest/state 并继续声明 complete，当前纵切无法推导该 edge 本应存在。
 
+## Multi-Agent task contract
+
+task 可以额外携带并发字段；没有这些字段的旧 task 保持兼容，但不能通过 merge gate：
+
+| 字段 | 约束 | 用途 |
+|---|---|---|
+| `baseRevision` | `git:<7–64 位 hex>` | Agent 启动时观察到的 immutable 基线 |
+| `readSet` | 仓库相对 glob 数组（可以为空） | 调度器判断写入对其他 Agent 的依赖 |
+| `writeSet` | 非空的仓库相对 glob 数组 | 合并门检查实际改动的写权限范围 |
+| `subject` / `role` | 可选非空字符串 | 把任务和具体 Agent / 角色绑定到 projection 与 Lease |
+
+`readSet` 与 `writeSet` 必须成对出现。调度器对两个 task 的 `write-write` overlap 直接串行化；`write-read` / `read-write` 可以并行，但读者在写者合并后必须重新投影和验证。glob overlap 判定对 wildcard 采用保守策略：误报只会少并行，漏报会隐藏 lost update，因此不接受“看起来大概不重叠”作为放行理由。
+
+`readSet` 是 Agent 声明的读取意图，不是工具观测到的实际读操作轨迹。
+
+`merge-gate.mjs` 只读 Git 历史，不执行 merge/rebase，也不替 Agent 修改工作树。它的 fast path 要求：
+
+1. `targetRef == baseRevision`；
+2. Agent 的实际 `baseRevision..headRef` 文件集合全部落在 `writeSet`；
+3. 目标分支从基线以来没有改过 Agent 要提交的同一文件。
+
+任一条件不满足都返回机器可读的 `stale-base`、`write-conflict` 或 `out-of-scope`，并以非零状态退出。
+
 ## Eval
 
 隔离 operator 先把 `control-plane/` 复制成 Agent 不可写的 snapshot，在 snapshot 外生成 Ed25519 key、revocation store、audit sink 和两个 daemon config。然后由 supervisor 启动：

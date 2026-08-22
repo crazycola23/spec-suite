@@ -134,6 +134,20 @@ node scripts/verify-consumer-contracts.mjs --specs-root . \
 
 The generator is fail-closed. It validates all canonical inputs and source references before writing; a failure leaves the prior bundle untouched. V1 generates `contract-bundle.json` plus `manifest.json`. It does not define `specHash`, SemVer compatibility, deprecation windows, or breaking-change policy; those are V2 concerns after the deterministic boundary is stable.
 
+### Multi-Agent execution surface
+
+When several Agents work in parallel, each task SHOULD declare `baseRevision`,
+`readSet`, and `writeSet`; `readSet` and `writeSet` MUST appear together. Give each
+Agent one identity and one worktree/branch. Treat `baseRevision` as a frozen observation:
+if the integration target advances, the result is stale until it is rebased and checked
+again, even when the changed files look disjoint.
+
+Run `node scripts/merge-gate.mjs` before integration. It MUST reject actual changes
+outside `writeSet`, same-file changes made on the target since `baseRevision`, and any
+task that omits the concurrency contract. `role` is descriptive identity metadata; it
+does not replace policy-owned authorization. The gate is read-only: it reports whether a
+fast-path merge is safe and never performs the merge or rebase itself.
+
 ## 6. Router
 
 - Evidence extraction, source qualification, unresolved vs decision → [INTERVIEW.md](INTERVIEW.md)

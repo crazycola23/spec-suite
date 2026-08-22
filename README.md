@@ -68,6 +68,36 @@ V1 Truth Integrity 保持冻结；新增控制面位于独立的 [`control-plane
 
 这仍是最小 adversarial vertical slice，不是真实 Stripe 或完整 sandbox framework。它检测 graph 声明不完整和 digest drift，但不声称证明 semantic graph completeness；可信时间源、ACL/capability 审计、MAC/container/eBPF 仍在边界之外。完整模型与 eval 见 [`control-plane/README.md`](./control-plane/README.md)。
 
+## Multi-Agent 并发纵切
+
+在 V2 control plane 之上，task 现在可以声明一份向后兼容的并发合同：
+
+```json
+{
+  "schemaVersion": 1,
+  "taskId": "task:frontend",
+  "subject": "agent:frontend-1",
+  "role": "frontend-implementer",
+  "baseRevision": "git:<agent-start-commit>",
+  "readSet": ["src/**"],
+  "writeSet": ["src/frontend/**"]
+}
+```
+
+`baseRevision` 是 Agent 开始任务时冻结的 Git commit；`writeSet` 是它允许提交的仓库相对 glob。合并前的 `merge-gate` 会同时检查实际改动是否越出 `writeSet`、目标分支是否仍停在 `baseRevision`，以及目标分支在这期间是否改过同一文件。目标分支哪怕只发生了无碰撞更新，也会返回 `stale-base`，要求先 rebase / 重新投影 / 重新检查，不把旧世界默默当成新世界。
+
+机器合同：merge gate 只在 target revision 等于 baseRevision、实际改动全在 writeSet 且没有同文件碰撞时放行 fast path。
+
+```bash
+node scripts/merge-gate.mjs \
+  --repo-root . \
+  --task tasks/frontend.json \
+  --target-ref main \
+  --head-ref agent/frontend
+```
+
+退出码 `0` 只表示当前 revision 上可以走 fast path；`2` 表示需要串行化、rebase 或处理越界写入；`1` 表示任务或仓库输入本身不可用。旧 task 没有并发字段时仍能用于现有 projection/Lease 流程，但不能通过这个 merge gate —— 未声明不等于安全。
+
 ## 两种模式
 
 **轻量模式**适用于普通仓库里的单个无依据事实。只创建 `.spec-suite/unresolved.yaml`，不引入完整规格基础设施。若项目以后采用 spec-suite，同一事实可单向、幂等升级为一个 `G-*`。
@@ -98,6 +128,10 @@ node scripts/generate-contract-bundle.mjs --specs-root . --config spec-suite.con
 # 验证消费仓库签入副本
 node scripts/verify-consumer-contracts.mjs --specs-root . \
   --config spec-suite.config.json --consumer-root <consumer-contract-directory>
+
+# 检查 Agent 分支是否仍可合并
+node scripts/merge-gate.mjs --repo-root . --task tasks/frontend.json \
+  --target-ref main --head-ref agent/frontend
 ```
 
 generator 是 fail-closed：canonical input 缺失、无法解析、source 指向 gap/generated 或 checker 有缺陷时，命令失败并保留上一份正确 bundle。

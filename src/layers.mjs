@@ -94,6 +94,7 @@ export const FILE_LAYERS = [
   // P2 明确不重构 V2，所以按"被当作库 import"的事实归为 control，
   // 并把这处偏离登记在 trust registry（Phase 5），而不是悄悄改掉它。
   { match: 'scripts/control-plane-common.mjs', layer: 'control' },
+  { match: 'scripts/control-plane-concurrency.mjs', layer: 'control' },
   { match: 'scripts/control-plane-ipc.mjs', layer: 'control' },
   { match: 'scripts/control-plane-trust.mjs', layer: 'control' },
   { match: 'scripts/enforce-effect.mjs', layer: 'control' },
@@ -102,6 +103,7 @@ export const FILE_LAYERS = [
 
   // 入口脚本
   { match: 'scripts/effect-enforcer-daemon.mjs', layer: 'cli' },
+  { match: 'scripts/merge-gate.mjs', layer: 'cli' },
   { match: 'scripts/lease-issuer-daemon.mjs', layer: 'cli' },
   { match: 'scripts/generate-contract-bundle.mjs', layer: 'cli' },
   { match: 'scripts/guard-unresolved-fact.mjs', layer: 'cli' },

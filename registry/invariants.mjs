@@ -659,6 +659,26 @@ export const INVARIANTS = [
       + '若 expected 与 consumer 被同时替换，校验依旧通过（与 INV-CANONICAL 的反向漂移同形）。',
     docRefs: ['SCHEMA.md §5'],
   },
+  {
+    id: 'CP-CONCURRENCY-GATE',
+    kind: 'control-plane',
+    title: 'merge gate 绑定基线与写集',
+    statement: 'merge gate 只在 target revision 等于 baseRevision、实际改动全在 writeSet 且没有同文件碰撞时放行 fast path。',
+    severity: 'error',
+    schemaVersions: [1],
+    schemaKind: 'control-plane-document',
+    enforcement: ENFORCEMENT.MACHINE,
+    checks: [],
+    evidence: [
+      'scripts/control-plane-concurrency.mjs',
+      'scripts/merge-gate.mjs',
+      'tests/adversarial/multi-agent-concurrency.test.mjs',
+    ],
+    residualRisk: 'gate 只读取 Git commit 之间的文件集合，不能观测 Agent 尚未提交的工作树、'
+      + '实际读取过哪些文件，或 rebase 之后业务语义是否仍然正确。'
+      + '它也不执行 merge/rebase；目标分支推进后必须由外部 integrator 重新生成结果并再次运行 gate。',
+    docRefs: ['README.md Multi-Agent 并发纵切', 'control-plane/README.md Multi-Agent task contract'],
+  },
 
   // ---- 外部假设：工具之外必须成立的事（control-plane/README.md）--------
   {
@@ -834,6 +854,21 @@ export const INVARIANTS = [
       + '影响的是可测试性：想单测某个退出码映射就得走进程边界。'
       + '本次重构没有动 V2 的这一层（P2 要求先稳定边界、不重写）。',
     docRefs: ['control-plane/README.md Isolated daemon boundary'],
+  },
+  {
+    id: 'GAP-CONCURRENCY-READSET',
+    kind: 'coverage-gap',
+    title: 'readSet 不是实际读取轨迹',
+    statement: 'readSet 是 Agent 声明的读取意图，不是工具观测到的实际读操作轨迹。',
+    severity: null,
+    schemaVersions: [1],
+    schemaKind: 'control-plane-document',
+    enforcement: ENFORCEMENT.NOT_PROVEN,
+    checks: [],
+    residualRisk: '当前合同没有 syscall、文件系统审计或 Agent runtime instrumentation。'
+      + 'Agent 漏报 readSet 时，write-read 依赖可能被低估；因此 writeSet collision 能被机器拦下，'
+      + '但读依赖完整性仍是声明与 review 的责任。',
+    docRefs: ['control-plane/README.md Multi-Agent task contract'],
   },
 ]
 
