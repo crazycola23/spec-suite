@@ -10,6 +10,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { MESSAGES_ZH, parseFlagsOrThrow } from '../src/shared/argv.mjs'
+import { isInside } from '../src/shared/paths.mjs'
 import { assertSchemaVersion, schemaVersionHint } from '../src/shared/schema-version.mjs'
 import { loadConfig, readText, toPosix } from './check-spec-suite.mjs'
 
@@ -36,10 +37,7 @@ function requireInside(root, rel, label) {
     throw new Error(`${label} 必须是非空相对路径：${rel}`)
   }
   const absolute = path.resolve(root, rel)
-  const back = path.relative(root, absolute)
-  if (back === '..' || back.startsWith(`..${path.sep}`) || path.isAbsolute(back)) {
-    throw new Error(`${label} 越出约定目录：${rel}`)
-  }
+  if (!isInside(root, absolute)) throw new Error(`${label} 越出约定目录：${rel}`)
   return absolute
 }
 

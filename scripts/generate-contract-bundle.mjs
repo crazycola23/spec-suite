@@ -18,6 +18,7 @@ import { writeFilesAtomic } from '../src/shared/atomic-write.mjs'
 // 会被随后的 JSON.stringify 悄悄丢掉 —— 字段从 bundle 里消失，而 manifest 的
 // digest 照样自洽。合法输入的输出逐字节不变，收紧只影响以前被静默丢弃的输入。
 import { canonicalize } from '../src/shared/canonical-json.mjs'
+import { isInside } from '../src/shared/paths.mjs'
 import { extractIdTokens, loadYamlLib, readText, run, toPosix } from './check-spec-suite.mjs'
 
 const SPEC = {
@@ -44,18 +45,9 @@ function resolveInside(root, rel, label) {
   if (typeof rel !== 'string' || rel.trim() === '') throw new Error(`${label} 必须是非空相对路径`)
   if (path.isAbsolute(rel)) throw new Error(`${label} 必须是相对路径：${rel}`)
   const absolute = path.resolve(root, rel)
-  const back = path.relative(root, absolute)
-  if (back === '..' || back.startsWith(`..${path.sep}`) || path.isAbsolute(back)) {
-    throw new Error(`${label} 越出规格库：${rel}`)
-  }
+  if (!isInside(root, absolute)) throw new Error(`${label} 越出规格库：${rel}`)
   return absolute
 }
-
-function isInside(parent, child) {
-  const rel = path.relative(parent, child)
-  return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel))
-}
-
 
 function validateSources({ contracts, config, defs, generatedRoot, specsRoot }) {
   const problems = []

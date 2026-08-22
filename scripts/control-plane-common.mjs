@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import { canonicalize, stableJson } from '../src/shared/canonical-json.mjs'
+import { isInside } from '../src/shared/paths.mjs'
 import { assertSchemaVersion as assertSchemaVersionPolicy } from '../src/shared/schema-version.mjs'
 
 // 这两个名字继续从本模块导出：enforce-effect / lease-issuer / project-context /
@@ -46,10 +47,7 @@ export function readJson(file, label = file) {
 export function resolveInside(root, candidate, label = 'path') {
   if (typeof candidate !== 'string' || candidate.trim() === '') throw new Error(`${label} must be a non-empty path`)
   const absolute = path.resolve(root, candidate)
-  const relative = path.relative(root, absolute)
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error(`${label} escapes the configured root: ${candidate}`)
-  }
+  if (!isInside(root, absolute)) throw new Error(`${label} escapes the configured root: ${candidate}`)
   return absolute
 }
 

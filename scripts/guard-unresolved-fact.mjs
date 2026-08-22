@@ -10,6 +10,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { MESSAGES_ZH, parseFlagsOrThrow } from '../src/shared/argv.mjs'
+import { isInside } from '../src/shared/paths.mjs'
 import { assertSchemaVersion, schemaVersionHint } from '../src/shared/schema-version.mjs'
 import { loadYamlLib, readText } from './check-spec-suite.mjs'
 
@@ -35,10 +36,7 @@ const HELP = `用法：node guard-unresolved-fact.mjs --fact <稳定事实名> [
 function resolveRegistry(specsRoot, rel) {
   if (path.isAbsolute(rel)) throw new Error('--unresolved 必须是项目内相对路径')
   const absolute = path.resolve(specsRoot, rel)
-  const back = path.relative(specsRoot, absolute)
-  if (back === '..' || back.startsWith(`..${path.sep}`) || path.isAbsolute(back)) {
-    throw new Error('--unresolved 越出项目根目录')
-  }
+  if (!isInside(specsRoot, absolute)) throw new Error('--unresolved 越出项目根目录')
   return absolute
 }
 

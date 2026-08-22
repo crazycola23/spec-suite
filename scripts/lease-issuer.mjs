@@ -32,6 +32,7 @@ import {
 } from './control-plane-common.mjs'
 import { MESSAGES_EN, parseFlagsOrThrow } from '../src/shared/argv.mjs'
 import { writeFileAtomic } from '../src/shared/atomic-write.mjs'
+import { isInside } from '../src/shared/paths.mjs'
 import { projectContext } from './project-context.mjs'
 
 const SPEC = {
@@ -66,10 +67,8 @@ const HELP = `Usage: node scripts/lease-issuer.mjs [options]
 
 function assertOutside(root, candidate, label) {
   if (!path.isAbsolute(candidate)) throw new Error(`${label} must be an absolute isolated path`)
-  const relative = path.relative(root, candidate)
-  if (relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) {
-    throw new Error(`${label} must be outside the agent-readable specs root`)
-  }
+  // 同一个谓词的反向用法：落在 specs root 之内（含 root 自身）即拒绝。
+  if (isInside(root, candidate)) throw new Error(`${label} must be outside the agent-readable specs root`)
 }
 
 function readPrivateKey(specsRoot, keyPath) {

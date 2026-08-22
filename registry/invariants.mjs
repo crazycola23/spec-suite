@@ -605,9 +605,21 @@ export const INVARIANTS = [
     schemaKind: 'control-plane-document',
     enforcement: ENFORCEMENT.MACHINE,
     checks: [],
-    evidence: ['scripts/enforce-effect.mjs', 'scripts/control-plane-trust.mjs', 'scripts/v2-control-plane.test.mjs'],
-    residualRisk: '全仓库**没有一处用 realpath**：包含性判定一律是 `path.resolve` + `path.relative` + 字符串比较，'
-      + '共 9 份各自独立的实现。只有 file effect 的 `normalizeFileResource` 逐段 lstat 拒绝符号链接，'
+    evidence: [
+      'src/shared/paths.mjs',
+      'scripts/paths.test.mjs',
+      'scripts/enforce-effect.mjs',
+      'scripts/control-plane-trust.mjs',
+      'scripts/v2-control-plane.test.mjs',
+    ],
+    residualRisk: '全仓库**没有一处用 realpath**：包含性判定一律是 `path.resolve` + `path.relative` + 字符串比较。'
+      + '其中作用在 OS 路径上的 8 份逐字重复实现已合并为 `src/shared/paths.mjs` 的 `isInside` 一份'
+      + '（其行为由 scripts/paths.test.mjs 用变异测试逐项量过：`root/../x` 逃逸、`root/..` 父目录本身、'
+      + '跨盘符、共享前缀的兄弟目录，以及"root 自身算在内"这一点被两个相反方向同时依赖的事实。'
+      + '其中"父目录本身"与"兄弟目录"两项在合并前的整套测试里都是全绿的盲区）；'
+      + '另有 3 处作用在 posix / URI 域上的检查刻意保持独立，因为它们的输入域与接受集不同。'
+      + '合并消除的是"抄歪一份、两个方向不对称失效"的风险，**没有**消除 symlink 缺口：'
+      + '`isInside` 是纯词法判定。只有 file effect 的 `normalizeFileResource` 逐段 lstat 拒绝符号链接，'
       + '而它是"拒绝"而非"解析"，且 lstat 与 write 之间存在 TOCTOU 窗口，代码没有关掉这个窗口。',
     docRefs: ['control-plane/README.md Isolated daemon boundary'],
   },
