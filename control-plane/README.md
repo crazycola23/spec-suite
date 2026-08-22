@@ -117,14 +117,21 @@ task 可以额外携带并发字段；没有这些字段的旧 task 保持兼容
 Write-write overlap serializes tasks; read/write overlap remains a post-merge
 revalidation obligation. The command does not launch Agents. `--apply` integrates
 completed heads into a checked-out, clean target branch and reruns the merge gate
-before every merge. It fails closed on stale, conflicting, or out-of-scope results.
+before every merge. For a `revalidation-required` result whose target changes are
+outside the declared read/write sets, it automatically replays the Agent commit
+range onto the current target in a temporary worktree and reruns the gate. The
+original Agent branch is never rewritten; only a structurally revalidated
+candidate is fast-forwarded. Same-file conflicts, scope failures, and failed
+replays remain blocked.
 
 The legacy `--allow-declared-disjoint` flag is accepted for compatibility but does
 not authorize a stale merge. If target changes match neither the task's declared
-`readSet` nor `writeSet`, the gate returns `revalidation-required` and remains
-unsafe until a real re-projection and validation pipeline runs. This is still based
-on declared intent, not observed read tracing, and must not be treated as a runtime
-capability grant.
+`readSet` nor `writeSet`, the gate returns `revalidation-required`; the orchestrator's
+default apply path performs structural replay and a second gate evaluation, while
+`--no-auto-revalidate` leaves the result blocked for an external integrator. This
+still relies on declared intent, not observed read tracing, and does not run
+semantic tests automatically; a successful replay must not be treated as proof that
+the Agent's unreported reads or behavior are correct.
 
 `merge-gate.mjs` 只读 Git 历史，不执行 merge/rebase，也不替 Agent 修改工作树。它的 fast path 要求：
 

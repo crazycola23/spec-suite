@@ -146,7 +146,9 @@ Run `node scripts/merge-gate.mjs` before integration. It MUST reject actual chan
 outside `writeSet`, same-file changes made on the target since `baseRevision`, and any
 task that omits the concurrency contract. `role` is descriptive identity metadata; it
 does not replace policy-owned authorization. The gate is read-only: it reports whether a
-fast-path merge is safe and never performs the merge or rebase itself.
+fast-path merge is safe and never performs the merge or rebase itself. The orchestrator
+may structurally rebase a `revalidation-required` result in a temporary worktree and
+rerun the gate, but that does not provide runtime read tracing or semantic validation.
 
 ## 6. Router
 

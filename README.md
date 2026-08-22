@@ -106,7 +106,7 @@ node scripts/orchestrate.mjs --repo-root . --tasks tasks/batch.json \
   --target-ref main --apply
 ```
 
-`orchestrate` 只负责已完成分支的计划与集成，不启动 Agent、不替 `readSet` 制造观测事实。默认模式只读；`--apply` 要求目标分支已检出且工作树干净。旧版的 `--allow-declared-disjoint` 参数仍可被兼容性调用接受，但不再把声明式 disjoint 当成已完成 revalidation；相关结果统一停下并报告 `revalidation-required`。
+`orchestrate` 只负责已完成分支的计划与集成，不启动 Agent、不替 `readSet` 制造观测事实。默认模式只读；`--apply` 要求目标分支已检出且工作树干净。遇到 target 已前进、但没有命中任务声明读写集的 `revalidation-required` 结果时，`--apply` 默认会在临时 worktree 将 Agent 提交重放到最新 target，再重新运行 gate；原 Agent 分支不会被改写，只有新的 candidate 通过 gate 才会 fast-forward。`--no-auto-revalidate` 可保留人工/外部 integrator 接管的阻断行为。这个闭环是结构性 revalidation，不等于运行时 read tracing 或语义测试；结果会明确标记 `semanticValidation: not-run`。旧版的 `--allow-declared-disjoint` 参数仍可被兼容性调用接受，但不再直接授权 stale merge。
 
 ## 两种模式
 

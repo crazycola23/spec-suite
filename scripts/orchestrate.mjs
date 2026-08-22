@@ -10,11 +10,13 @@
  *
  * Without --apply the command is read-only and emits a conflict DAG plus
  * deterministic execution batches. With --apply it requires a clean target
- * worktree, re-runs the gate before every merge, and stops on the first result
- * that needs rebase/reprojection or has a scope/conflict failure.
+ * worktree, re-runs the gate before every merge, and structurally revalidates
+ * stale-but-declared-disjoint results in a temporary worktree. Blocked results
+ * are recorded and later independent tasks are still inspected.
  */
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
@@ -39,6 +41,7 @@ const SPEC = {
   '--output': { key: 'output' },
   '--apply': { key: 'apply', flag: true },
   '--allow-declared-disjoint': { key: 'allowDeclaredDisjoint', flag: true },
+  '--no-auto-revalidate': { key: 'noAutoRevalidate', flag: true },
   '--help': { key: 'help', flag: true },
 }
 
@@ -50,6 +53,7 @@ const HELP = `Usage: node scripts/orchestrate.mjs [options]
   --output <relative path>        optional result JSON inside repo-root
   --apply                         merge completed task headRefs into target
   --allow-declared-disjoint       deprecated compatibility flag; never bypasses revalidation
+  --no-auto-revalidate            leave revalidation-required results blocked
   --help                          show this help
 
 Without --apply the command only plans. Exit 0 = plan/integration complete;
@@ -77,6 +81,10 @@ function resolveCommit(repoRoot, ref, label) {
   const sha = git(repoRoot, ['rev-parse', '--verify', '--end-of-options', `${value}^{commit}`], label)
   if (!/^[0-9a-f]{40,64}$/i.test(sha)) throw new Error(`${label} did not resolve to a commit`)
   return `git:${sha.toLowerCase()}`
+}
+
+function revisionSha(revision) {
+  return revision.startsWith('git:') ? revision.slice('git:'.length) : revision
 }
 
 function readManifest(repoRoot, candidate) {
@@ -199,16 +207,73 @@ function assertApplyWorktree(repoRoot, targetRef) {
   }
 }
 
-function mergeHead(repoRoot, headRef, gateStatus) {
+function mergeHead(repoRoot, headRef) {
   try {
-    if (gateStatus === 'ready') {
-      git(repoRoot, ['merge', '--ff-only', headRef], `fast-forward ${headRef}`)
-    } else {
-      git(repoRoot, ['merge', '--no-ff', '--no-edit', headRef], `merge ${headRef}`)
-    }
+    git(repoRoot, ['merge', '--ff-only', revisionSha(headRef)], `fast-forward ${headRef}`)
   } catch (error) {
     try { git(repoRoot, ['merge', '--abort'], 'abort conflicted merge') } catch { /* no merge in progress */ }
     throw error
+  }
+}
+
+/**
+ * Replay an Agent's commit range onto the current target without touching the
+ * Agent branch. The returned gate is evaluated against the new target
+ * revision, so a successful result is a real fast-path candidate rather than
+ * an exception for the original stale gate.
+ *
+ * This is intentionally structural revalidation only. It proves that the
+ * commit range can be replayed and still satisfies writeSet; it cannot prove
+ * an unobserved read that the Agent omitted from readSet or semantic tests
+ * that the caller did not provide.
+ */
+function structurallyRevalidateTask({ repoRoot, task, targetRef, headRef }) {
+  const baseRevision = resolveCommit(repoRoot, task.baseRevision, 'task base revision')
+  const targetRevision = resolveCommit(repoRoot, targetRef, 'current target ref')
+  const temporaryWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-suite-revalidate-'))
+  let worktreeAdded = false
+  try {
+    git(repoRoot, ['worktree', 'add', '--detach', temporaryWorktree, revisionSha(headRef)], `create revalidation worktree for ${task.taskId}`)
+    worktreeAdded = true
+    git(temporaryWorktree, [
+      'rebase',
+      '--onto',
+      revisionSha(targetRevision),
+      revisionSha(baseRevision),
+      'HEAD',
+    ], `rebase ${task.taskId} onto current target`)
+    const candidateHead = resolveCommit(temporaryWorktree, 'HEAD', 'rebased Agent head')
+    const candidateTask = {
+      ...task,
+      baseRevision: targetRevision,
+    }
+    const gate = evaluateMergeGate({
+      repoRoot,
+      task: candidateTask,
+      targetRef,
+      headRef: candidateHead,
+    })
+    return {
+      status: gate.safeToMerge ? 'passed' : 'failed',
+      method: 'temporary-worktree-rebase',
+      originalBaseRevision: baseRevision,
+      targetRevision,
+      candidateHead,
+      gate,
+      semanticValidation: {
+        status: 'not-run',
+        reason: 'no runtime read trace or caller-supplied semantic validation hook',
+      },
+    }
+  } finally {
+    if (worktreeAdded) {
+      try {
+        git(repoRoot, ['worktree', 'remove', '--force', temporaryWorktree], 'remove revalidation worktree')
+      } catch {
+        // The final fs cleanup below is limited to the unique temp directory.
+      }
+    }
+    fs.rmSync(temporaryWorktree, { recursive: true, force: true })
   }
 }
 
@@ -217,6 +282,7 @@ export function integrateCompletedTasks({
   tasks: inputTasks,
   targetRef = 'main',
   allowDeclaredDisjoint = false,
+  autoRevalidate = true,
   apply = false,
 } = {}) {
   const tasks = normalizeTasks(inputTasks)
@@ -227,6 +293,7 @@ export function integrateCompletedTasks({
     targetRef,
     apply,
     allowDeclaredDisjoint,
+    autoRevalidate,
     initialTargetRevision: resolveCommit(repoRoot, targetRef, 'target ref'),
     integrations: [],
     blocked: [],
@@ -257,6 +324,49 @@ export function integrateCompletedTasks({
       })
       const entry = { taskId, headRef, gate }
       if (!gate.safeToMerge) {
+        if (apply && autoRevalidate && gate.status === 'revalidation-required') {
+          try {
+            const revalidation = structurallyRevalidateTask({
+              repoRoot,
+              task,
+              targetRef,
+              headRef,
+            })
+            entry.revalidation = revalidation
+            if (revalidation.gate.safeToMerge) {
+              mergeHead(repoRoot, revalidation.candidateHead)
+              entry.targetRevisionAfterMerge = resolveCommit(repoRoot, targetRef, 'target after revalidation merge')
+              result.integrations.push(entry)
+              continue
+            }
+            result.blocked.push({
+              taskId,
+              reason: 'revalidation-failed',
+              requiresRebase: revalidation.gate.checks.requiresRebase,
+              requiresRevalidation: revalidation.gate.checks.requiresRevalidation,
+            })
+            result.integrations.push(entry)
+            continue
+          } catch (error) {
+            entry.revalidation = {
+              status: 'failed',
+              method: 'temporary-worktree-rebase',
+              error: error.message,
+              semanticValidation: {
+                status: 'not-run',
+                reason: 'structural replay failed before semantic validation',
+              },
+            }
+            result.blocked.push({
+              taskId,
+              reason: 'revalidation-failed',
+              requiresRebase: true,
+              requiresRevalidation: true,
+            })
+            result.integrations.push(entry)
+            continue
+          }
+        }
         result.blocked.push({
           taskId,
           reason: gate.status,
@@ -267,7 +377,7 @@ export function integrateCompletedTasks({
         continue
       }
       if (apply) {
-        mergeHead(repoRoot, headRef, gate.status)
+        mergeHead(repoRoot, headRef)
         entry.targetRevisionAfterMerge = resolveCommit(repoRoot, targetRef, 'target after merge')
       }
       result.integrations.push(entry)
@@ -295,6 +405,7 @@ function main() {
       tasks,
       targetRef: options.targetRef ?? 'main',
       allowDeclaredDisjoint: options.allowDeclaredDisjoint === true,
+      autoRevalidate: options.noAutoRevalidate !== true,
       apply: options.apply === true,
     })
     const bytes = `${stableJson(result, 2)}\n`

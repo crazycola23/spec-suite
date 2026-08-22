@@ -99,7 +99,7 @@ test('plan-only orchestration does not require completed Agent refs', () => {
   }
 })
 
-test('apply does not bypass revalidation for disjoint completed branches', () => {
+test('apply structurally revalidates disjoint completed branches without rewriting Agent refs', () => {
   const { root, base } = makeRepo()
   try {
     const frontendHead = branchFromBase(root, base, 'agent/frontend', 'src/frontend/button.js', 'export const button = 1\n')
@@ -121,11 +121,17 @@ test('apply does not bypass revalidation for disjoint completed branches', () =>
       apply: true,
       allowDeclaredDisjoint: true,
     })
-    assert.equal(result.status, 'blocked')
+    assert.equal(result.status, 'completed')
     assert.equal(result.integrations.length, 2)
-    assert.ok(result.integrations.some((entry) => entry.gate.status === 'revalidation-required'))
-    assert.deepEqual(result.blocked.map((entry) => entry.reason), ['revalidation-required'])
-    assert.equal(fs.existsSync(path.join(root, 'src', 'frontend', 'button.js')), false)
+    assert.deepEqual(result.blocked, [])
+    const revalidated = result.integrations.find((entry) => entry.gate.status === 'revalidation-required')
+    assert.ok(revalidated)
+    assert.equal(revalidated.revalidation.status, 'passed')
+    assert.equal(revalidated.revalidation.method, 'temporary-worktree-rebase')
+    assert.equal(revalidated.revalidation.gate.status, 'ready')
+    assert.equal(git(root, ['rev-parse', 'agent/frontend']), frontendHead)
+    assert.equal(git(root, ['rev-parse', 'agent/backend']), backendHead)
+    assert.equal(fs.existsSync(path.join(root, 'src', 'frontend', 'button.js')), true)
     assert.equal(fs.existsSync(path.join(root, 'src', 'backend', 'route.js')), true)
     assert.equal(git(root, ['status', '--porcelain']), '')
   } finally {
@@ -133,7 +139,7 @@ test('apply does not bypass revalidation for disjoint completed branches', () =>
   }
 })
 
-test('apply stops on stale work when declared-disjoint is not explicitly enabled', () => {
+test('apply can opt out of automatic structural revalidation', () => {
   const { root, base } = makeRepo()
   try {
     const frontendHead = branchFromBase(root, base, 'agent/frontend', 'src/frontend/button.js', 'export const button = 1\n')
@@ -153,11 +159,37 @@ test('apply stops on stale work when declared-disjoint is not explicitly enabled
       ],
       targetRef: 'main',
       apply: true,
+      autoRevalidate: false,
     })
     assert.equal(result.status, 'blocked')
     assert.deepEqual(result.blocked.map((entry) => entry.reason), ['revalidation-required'])
     assert.equal(fs.existsSync(path.join(root, 'src', 'frontend', 'button.js')), false)
     assert.equal(fs.existsSync(path.join(root, 'src', 'backend', 'route.js')), true)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('automatic structural revalidation leaves same-file conflicts blocked', () => {
+  const { root, base } = makeRepo()
+  try {
+    const frontendHead = branchFromBase(root, base, 'agent/frontend', 'src/frontend/index.js', 'export const ui = 2\n')
+    git(root, ['switch', '-q', 'main'])
+    fs.writeFileSync(path.join(root, 'src', 'frontend', 'index.js'), 'export const ui = 3\n')
+    git(root, ['add', 'src/frontend/index.js'])
+    git(root, ['commit', '-q', '-m', 'integrator change'])
+
+    const result = integrateCompletedTasks({
+      repoRoot: root,
+      tasks: [task(base, { headRef: frontendHead })],
+      targetRef: 'main',
+      apply: true,
+    })
+    assert.equal(result.status, 'blocked')
+    assert.deepEqual(result.blocked.map((entry) => entry.reason), ['write-conflict'])
+    assert.equal(result.integrations[0].revalidation, undefined)
+    assert.equal(fs.readFileSync(path.join(root, 'src', 'frontend', 'index.js'), 'utf8'), 'export const ui = 3\n')
+    assert.equal(git(root, ['status', '--porcelain']), '')
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
