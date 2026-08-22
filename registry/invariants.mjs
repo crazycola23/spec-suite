@@ -586,7 +586,9 @@ export const INVARIANTS = [
     evidence: ['scripts/enforce-effect.mjs', 'scripts/v2-control-plane.test.mjs'],
     residualRisk: '兜底靠两处 `throw`（分类器的 fall-through 与执行器的 `authorized effect lost its classifier`），'
       + '**不是构造上穷尽**：没有枚举或查表，分类链与执行链是两条独立的 if-chain。'
-      + '两条链一旦不同步，只会在运行到那个 effect 时才暴露。见 Phase 6 锁住的 effect class 集合。',
+      + 'Phase 6 用源码普查锁住了两条链的 kind 集合（各 3 个、且必须相等），所以"只改一边"现在会变红；'
+      + '但普查只认 `kind === \'…\'` 字面量 —— 若有人按 kind 之外的字段（如 resource 前缀）另开一条分支，'
+      + '集合看起来没变，普查不会发现。',
     docRefs: ['control-plane/README.md 已闭合的机器链'],
   },
   {

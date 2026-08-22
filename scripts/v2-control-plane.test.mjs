@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url'
 
 import { jsonDigest, stableJson } from './control-plane-common.mjs'
 import { loadIssuerDaemonConfig } from './control-plane-trust.mjs'
-import { interceptEffect } from './enforce-effect.mjs'
+import { blankComments } from './check-architecture.mjs'
+import { classifyEffect, interceptEffect } from './enforce-effect.mjs'
 import { projectContext } from './project-context.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -782,6 +783,94 @@ test('G-17 blocks live Stripe mock issuance and defeats a correctly signed over-
   assertMachineCause(enforcement.decision.cause, 'unresolved')
   assert.equal(enforcement.decision.cause.blockingRecord, 'G-17')
   assert.equal(fs.existsSync(harness.mockNetworkLogPath), false)
+})
+
+// ---------------------------------------------------------------------------
+// P2：effect class 集合的封边
+// ---------------------------------------------------------------------------
+
+/** 取一个顶层函数的源码：从声明行到第一处独占一行的 `}`。 */
+function functionSource(src, declaration) {
+  const lines = src.split('\n')
+  const start = lines.findIndex((l) => l.startsWith(declaration))
+  assert.notEqual(start, -1, `找不到函数声明：${declaration}`)
+  const end = lines.findIndex((l, i) => i > start && l === '}')
+  assert.notEqual(end, -1, `${declaration} 没有以顶层 } 结束`)
+  return lines.slice(start, end + 1).join('\n')
+}
+
+/** 一段源码里比较过的 effect kind 字面量。先剥注释，否则注释里提到的 kind 会被当成分支。 */
+const kindsIn = (src) => new Set([...blankComments(src).matchAll(/kind === '([^']+)'/g)].map((m) => m[1]))
+
+const KNOWN_EFFECT_KINDS = ['file.write', 'network.mock.live-stripe', 'network.mock.protected']
+
+test('P2：effect class 恰好是这 3 个，新增一类会撞上这条测试', () => {
+  // 这条测试是**故意脆弱**的。P2 的约束是"不新增 effect type（shell / database /
+  // email / GitHub / cloud / payment / browser）"，而这个约束写在计划文档里，
+  // 没有任何机器强制 —— 于是它迟早被人顺手绕过。
+  //
+  // 这里不打算让新增 class 变得不可能，只打算让它**不可能悄悄发生**：往
+  // classifyEffect 的 if 链里加一个 kind，就会撞上下面这条断言，作者会被迫
+  // 来读这段注释、并解释新 class 为什么不需要走统一授权模型。
+  const src = fs.readFileSync(path.join(HERE, 'enforce-effect.mjs'), 'utf8')
+  const classify = kindsIn(functionSource(src, 'export function classifyEffect('))
+
+  assert.deepEqual(
+    [...classify].sort(), KNOWN_EFFECT_KINDS,
+    'effect class 集合变了。P2 明确不扩展 effect type —— 新增一类必须复用统一授权模型'
+    + '（protected + protection 三元组 + lease 校验），不能在 if 链上再加一个特例分支。',
+  )
+
+  // 分类链与执行链必须覆盖同一集合。少一边的后果不同但都很糟：
+  // 只在 classify 里加 ⇒ 授权通过后 `authorized effect lost its classifier`
+  // （fail closed，但要到执行那一刻才炸）；只在 execute 里加 ⇒ 那段代码永远
+  // 到不了，是死代码，读的人却会以为该 kind 被支持。
+  const execute = kindsIn(functionSource(src, 'function executeAuthorizedEffect('))
+  assert.deepEqual(
+    [...execute].sort(), [...classify].sort(),
+    '分类链与执行链的 effect kind 集合不一致 —— 两条 if 链必须同步维护',
+  )
+})
+
+test('P2：只有 file.write 能被 baseline 免 lease，新 effect class 天生需要 lease', () => {
+  // `baselineAuthorizes` 里硬编码了 `classified.kind === 'file.write'`，所以
+  // baseline 规则**只对文件写生效**。这个事实值得单独锁住：它意味着将来若真
+  // 有人加了第四类 effect，那一类默认落在"必须持 lease"一侧，而不是默认免检。
+  //
+  // 这是 fail-closed 的方向。反过来（新 class 默认可被 baseline 命中）会让
+  // 一条 resourcePrefix 意外授权一整类全新的副作用。
+  const src = fs.readFileSync(path.join(HERE, 'enforce-effect.mjs'), 'utf8')
+  const baseline = kindsIn(functionSource(src, 'function baselineAuthorizes('))
+  assert.deepEqual(
+    [...baseline], ['file.write'],
+    'baseline 的免 lease 判定不再只针对 file.write —— 这会让新 effect class 默认免检，方向错了',
+  )
+})
+
+test('P2：未登记的 effect kind 在分类与拦截两层都 fail closed', () => {
+  // 静态断言只能证明"源码里现在有 3 个分支"。这条证明的是运行期行为：
+  // 没登记的 kind 不会掉进任何一个分支后被当成无害的东西放过去。
+  const unknown = {
+    schemaVersion: 1,
+    taskId: 'task:customer-update',
+    subject: 'agent:harness',
+    kind: 'shell.exec',
+    resource: 'rm -rf /',
+    payload: null,
+  }
+
+  assert.throws(
+    () => classifyEffect(unknown, '/workspace', { baseline: [], protectedResources: [] }),
+    /effect kind is not classified/,
+    '未知 kind 必须抛错，不能返回一个 protected:false 的分类结果',
+  )
+
+  const harness = makeHarness()
+  const lease = issueLease(harness)
+  const decision = interceptEffect(enforcerOptions(harness, unknown, lease))
+  assert.equal(decision.allowed, false, '持有有效 lease 也不能让未知 kind 通过')
+  assert.match(decision.reason, /effect_unclassified/)
+  assert.equal(fs.existsSync(harness.mockNetworkLogPath), false, '被拒的 effect 不得留下任何副作用')
 })
 
 test('protected file classification rejects any baseline overlap before authorization', () => {
