@@ -10,11 +10,30 @@ permissions:
 jobs:
   node-tests:
     runs-on: ubuntu-latest
+    strategy:
+      # fail-fast: false 是有意的。矩阵存在的意义就是分辨"到处都坏"与"只在某个
+      # 版本坏"，而默认的 fail-fast 会在第一条腿变红时取消其余腿 —— 那正好抹掉
+      # 这个区别，把版本相关的失败伪装成普通失败。
+      fail-fast: false
+      matrix:
+        # 22 = 当前 LTS，24 = 下一条 LTS 线。20 已于 2026-04 结束维护，留着它
+        # 只会让"在 EOL 运行时上是绿的"变成一条无人能用的保证。
+        #
+        # 为什么是两个版本而不是一个：本仓库有几处断言依赖 node 的具体行为，
+        # 最典型的是 `node --test tests/*/*.test.mjs` 那个 glob —— 目录递归发现
+        # 的语义在 20/22/24 之间变过，当初就是因为 24 上 `node --test tests/`
+        # 不再递归才改成显式 glob。跑两个版本能让"只在某个版本上坏"从"到处都坏"
+        # 里分辨出来。
+        #
+        # 它**不能**替代的那件事：如果 glob 有一天谁都匹配不到，`node --test`
+        # 会报 0 个测试并以 0 退出 —— 两条腿会一起变绿。矩阵对这种形状是瞎的，
+        # 这里写明是为了不把它记成已有的防线。
+        node-version: ['22', '24']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
       # SPEC_SUITE_REQUIRE_POSIX_ISOLATION=1 让"缺 POSIX 身份 / symlink 能力"
