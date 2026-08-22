@@ -9,28 +9,32 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { MESSAGES_ZH, parseFlagsOrThrow } from '../src/shared/argv.mjs'
 import { writeFilesAtomic } from '../src/shared/atomic-write.mjs'
 import { assertSchemaVersion, schemaVersionHint } from '../src/shared/schema-version.mjs'
 import { loadYamlLib, readText } from './check-spec-suite.mjs'
 
+/**
+ * `--block` 可重复 ⇒ `list`。共享解析器会把 list 型的 key 预置成 `[]`，所以
+ * `out.blocks` 的初值不再需要在这里声明。
+ *
+ * 合并前 `--block` 出现在 argv 末尾时会 `push(undefined)`，最终序列化成
+ * `dictionary.yaml` 里的一个 `null` —— 把猜测写进权威文件。现在缺值直接报错。
+ */
+const SPEC = {
+  '--specs-root': { key: 'specsRoot' },
+  '--unresolved': { key: 'unresolved' },
+  '--dictionary': { key: 'dictionary' },
+  '--fact': { key: 'fact' },
+  '--block': { key: 'blocks', list: true },
+  '--protective-default': { key: 'protectiveDefault' },
+  '--rollback-cost': { key: 'rollbackCost' },
+  '--owner': { key: 'owner' },
+  '--help': { key: 'help', flag: true },
+}
+
 function parseArgs(argv) {
-  const out = { blocks: [] }
-  for (let i = 0; i < argv.length; i++) {
-    const value = argv[i + 1]
-    switch (argv[i]) {
-      case '--specs-root': out.specsRoot = value; i++; break
-      case '--unresolved': out.unresolved = value; i++; break
-      case '--dictionary': out.dictionary = value; i++; break
-      case '--fact': out.fact = value; i++; break
-      case '--block': out.blocks.push(value); i++; break
-      case '--protective-default': out.protectiveDefault = value; i++; break
-      case '--rollback-cost': out.rollbackCost = value; i++; break
-      case '--owner': out.owner = value; i++; break
-      case '--help': out.help = true; break
-      default: throw new Error(`未知参数：${argv[i]}`)
-    }
-  }
-  return out
+  return parseFlagsOrThrow(argv, SPEC, MESSAGES_ZH)
 }
 
 const HELP = `用法：

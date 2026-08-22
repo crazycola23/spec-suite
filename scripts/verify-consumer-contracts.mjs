@@ -9,21 +9,19 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { MESSAGES_ZH, parseFlagsOrThrow } from '../src/shared/argv.mjs'
 import { assertSchemaVersion, schemaVersionHint } from '../src/shared/schema-version.mjs'
 import { loadConfig, readText, toPosix } from './check-spec-suite.mjs'
 
+const SPEC = {
+  '--specs-root': { key: 'specsRoot' },
+  '--consumer-root': { key: 'consumerRoot' },
+  '--config': { key: 'config' },
+  '--help': { key: 'help', flag: true },
+}
+
 function parseArgs(argv) {
-  const out = {}
-  for (let i = 0; i < argv.length; i++) {
-    switch (argv[i]) {
-      case '--specs-root': out.specsRoot = argv[++i]; break
-      case '--consumer-root': out.consumerRoot = argv[++i]; break
-      case '--config': out.config = argv[++i]; break
-      case '--help': out.help = true; break
-      default: throw new Error(`未知参数：${argv[i]}`)
-    }
-  }
-  return out
+  return parseFlagsOrThrow(argv, SPEC, MESSAGES_ZH)
 }
 
 const HELP = `用法：node verify-consumer-contracts.mjs [选项]

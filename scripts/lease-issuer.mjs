@@ -30,27 +30,25 @@ import {
   stringSet,
   validatePolicyFileRules,
 } from './control-plane-common.mjs'
+import { MESSAGES_EN, parseFlagsOrThrow } from '../src/shared/argv.mjs'
 import { writeFileAtomic } from '../src/shared/atomic-write.mjs'
 import { projectContext } from './project-context.mjs'
 
+const SPEC = {
+  '--specs-root': { key: 'specsRoot' },
+  '--graph': { key: 'graph' },
+  '--task': { key: 'task' },
+  '--state': { key: 'state' },
+  '--policy': { key: 'policy' },
+  '--projection': { key: 'projection' },
+  '--request': { key: 'request' },
+  '--private-key': { key: 'privateKey' },
+  '--output': { key: 'output' },
+  '--help': { key: 'help', flag: true },
+}
+
 function parseArgs(argv) {
-  const result = {}
-  for (let index = 0; index < argv.length; index++) {
-    switch (argv[index]) {
-      case '--specs-root': result.specsRoot = argv[++index]; break
-      case '--graph': result.graph = argv[++index]; break
-      case '--task': result.task = argv[++index]; break
-      case '--state': result.state = argv[++index]; break
-      case '--policy': result.policy = argv[++index]; break
-      case '--projection': result.projection = argv[++index]; break
-      case '--request': result.request = argv[++index]; break
-      case '--private-key': result.privateKey = argv[++index]; break
-      case '--output': result.output = argv[++index]; break
-      case '--help': result.help = true; break
-      default: throw new Error(`unknown argument: ${argv[index]}`)
-    }
-  }
-  return result
+  return parseFlagsOrThrow(argv, SPEC, MESSAGES_EN)
 }
 
 const HELP = `Usage: node scripts/lease-issuer.mjs [options]

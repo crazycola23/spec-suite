@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { parseExactConfigFlag } from '../src/shared/argv.mjs'
 import {
   assertSchemaVersion,
   canonicalEffectReference,
@@ -14,12 +14,11 @@ import { serveJsonLines } from './control-plane-ipc.mjs'
 import { loadIssuerDaemonConfig } from './control-plane-trust.mjs'
 import { issueLeaseFromTrustedInputs } from './lease-issuer.mjs'
 
+// 与 effect-enforcer-daemon 同形：定长 argv，由 supervisor 启动，没有 --help。
+const USAGE = 'usage: node scripts/lease-issuer-daemon.mjs --config <isolated absolute path>'
+
 function parseConfigPath(argv) {
-  if (argv.length !== 2 || argv[0] !== '--config') {
-    throw new Error('usage: node scripts/lease-issuer-daemon.mjs --config <isolated absolute path>')
-  }
-  if (!path.isAbsolute(argv[1])) throw new Error('--config must be an absolute isolated path')
-  return argv[1]
+  return parseExactConfigFlag(argv, USAGE)
 }
 
 function validateIpcRequest(request, config) {

@@ -22,6 +22,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { MESSAGES_ZH, parseFlags } from '../src/shared/argv.mjs'
 import { writeFilesAtomic } from '../src/shared/atomic-write.mjs'
 import { findZones } from '../src/truth/adapters/zones.mjs'
 import { CHECKS, invariantsOfKind, validateRegistry } from '../registry/invariants.mjs'
@@ -194,15 +195,29 @@ const HELP = `用法：node scripts/render-docs.mjs [--check|--write]
 下一次 --check 就会把它报成漂移。要改内容，改 registry。
 `
 
-export function main(argv) {
-  let mode = 'check'
-  for (const arg of argv) {
-    if (arg === '--check') mode = 'check'
-    else if (arg === '--write') mode = 'write'
-    else if (arg === '--help' || arg === '-h') { process.stdout.write(HELP); return 0 }
-    else { process.stderr.write(`未知参数：${arg}\n`); return 2 }
-  }
+/**
+ * `--check` 与 `--write` 是一对**模式**，不是两个独立布尔：同一个 key 被赋成
+ * 不同常量，所以"后者胜"—— 与合并前那个 `let mode` 逐次覆盖的语义相同
+ * （`--write --check` ⇒ check）。用 `flag: true` 会把它变成"write 优先"，
+ * 那是悄悄改语义。
+ */
+const SPEC = {
+  '--check': { key: 'mode', set: 'check' },
+  '--write': { key: 'mode', set: 'write' },
+  '--help': { key: 'help', flag: true },
+  '-h': { key: 'help', flag: true },
+}
 
+export function main(argv) {
+  // 一处**有意**的行为变化：合并前 `--help` 在循环里就 `return 0`，于是
+  // `--help --bogus` 会打印帮助并成功退出，看不见后面那个错参数。现在整个
+  // argv 先解析完，`--bogus` 会让它以 2 退出 —— 与其余九个 CLI 一致，也更
+  // fail-closed。两种输入都是非法调用，没有测试钉住旧行为。
+  const { options, error } = parseFlags(argv, SPEC, MESSAGES_ZH)
+  if (error) { process.stderr.write(`${error}\n`); return 2 }
+  if (options.help) { process.stdout.write(HELP); return 0 }
+  // 缺省 check —— 与合并前的 `let mode = 'check'` 相同。
+  const mode = options.mode ?? 'check'
   const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..')
   const { problems, files } = planDocs(repoRoot)
 

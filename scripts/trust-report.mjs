@@ -23,6 +23,8 @@
 
 import { pathToFileURL } from 'node:url'
 
+import { MESSAGES_ZH, parseFlags } from '../src/shared/argv.mjs'
+
 import {
   CHECKS, ENFORCEMENT, INVARIANTS,
   DEFAULT_SCHEMA_KIND, checkById, groupByEnforcement, validateRegistry,
@@ -79,20 +81,33 @@ external-assumption / not-proven）渲染成信任边界报告。
 
 只写 stdout，不落盘。输出是确定性的：同一份 registry 得到同一份字节。`
 
+/**
+ * `--format` 的取值校验交给 spec 的 `validate` —— 它同时负责"缺失"情形，因为
+ * 合并前这一句把"缺失"与"取值非法"合成了一条文案，而那条文案被
+ * trust-report.test.mjs 逐字/正则钉住（`/\(缺失\)/`、`/只接受 json 或 md/`）。
+ * 共享解析器的通用缺值文案会覆盖掉它，所以带 validate 的条目由 validate 自己
+ * 处理 undefined；argv.test.mjs 有一条测试要求所有 validate 都拒绝 undefined，
+ * 免得这个入口变成绕过缺值检测的后门。
+ *
+ * 因此 `SPEC` 必须导出：那条测试是全仓库扫描式的（找出所有带 validate 的 spec
+ * 再逐条喂 undefined），藏在未导出的表里就等于豁免了检查。这是本文件里唯一一个
+ * "为了被测试而导出"的名字，值得 —— 它换来的是"以后新增的 validate 也躲不掉"。
+ */
+export const SPEC = {
+  '-h': { key: 'help', flag: true },
+  '--help': { key: 'help', flag: true },
+  '--format': {
+    key: 'format',
+    validate: (v) => (v === 'json' || v === 'md' ? null : `--format 只接受 json 或 md，收到：${v ?? '(缺失)'}`),
+  },
+}
+
 /** 解析 argv。未知参数一律报错，不猜测。 */
 export function parseArgv(argv) {
-  const opts = { format: 'md', help: false }
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i]
-    if (arg === '-h' || arg === '--help') opts.help = true
-    else if (arg === '--format') {
-      const v = argv[i + 1]
-      if (v !== 'json' && v !== 'md') return { error: `--format 只接受 json 或 md，收到：${v ?? '(缺失)'}` }
-      opts.format = v
-      i += 1
-    } else return { error: `未知参数：${arg}` }
-  }
-  return { opts }
+  const { options, error } = parseFlags(argv, SPEC, MESSAGES_ZH)
+  if (error) return { error }
+  // 缺省 md、help 缺省 false —— 与合并前的初值逐字相同。
+  return { opts: { format: 'md', help: false, ...options } }
 }
 
 /**

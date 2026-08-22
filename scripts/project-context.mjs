@@ -14,6 +14,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { MESSAGES_EN, parseFlagsOrThrow } from '../src/shared/argv.mjs'
+
 import {
   assertSchemaVersion,
   computeCanonicalRevision,
@@ -33,25 +35,21 @@ function addReason(reasons, reason) {
   if (!reasons.includes(reason)) reasons.push(reason)
 }
 
+const SPEC = {
+  '--specs-root': { key: 'specsRoot' },
+  '--graph': { key: 'graph' },
+  '--task': { key: 'task' },
+  '--state': { key: 'state' },
+  '--policy': { key: 'policy' },
+  '--output': { key: 'output' },
+  '--root': { key: 'roots', list: true },
+  '--candidate-root': { key: 'candidateRoots', list: true },
+  '--surface': { key: 'surfaces', list: true },
+  '--help': { key: 'help', flag: true },
+}
+
 function parseArgs(argv) {
-  const result = { roots: [], candidateRoots: [], surfaces: [] }
-  for (let index = 0; index < argv.length; index++) {
-    const argument = argv[index]
-    switch (argument) {
-      case '--specs-root': result.specsRoot = argv[++index]; break
-      case '--graph': result.graph = argv[++index]; break
-      case '--task': result.task = argv[++index]; break
-      case '--state': result.state = argv[++index]; break
-      case '--policy': result.policy = argv[++index]; break
-      case '--output': result.output = argv[++index]; break
-      case '--root': result.roots.push(argv[++index]); break
-      case '--candidate-root': result.candidateRoots.push(argv[++index]); break
-      case '--surface': result.surfaces.push(argv[++index]); break
-      case '--help': result.help = true; break
-      default: throw new Error(`unknown argument: ${argument}`)
-    }
-  }
-  return result
+  return parseFlagsOrThrow(argv, SPEC, MESSAGES_EN)
 }
 
 const HELP = `Usage: node scripts/project-context.mjs [options]

@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 
-import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { parseExactConfigFlag } from '../src/shared/argv.mjs'
 import { assertSchemaVersion, strictObject } from './control-plane-common.mjs'
 import { serveJsonLines } from './control-plane-ipc.mjs'
 import { loadEnforcerDaemonConfig } from './control-plane-trust.mjs'
 import { interceptEffect } from './enforce-effect.mjs'
 
+// daemon 的 argv 形状是契约的一部分：只由 supervisor 启动，多一个少一个参数都
+// 该拒绝，而不是"尽力理解"。usage 文案只差脚本名，所以由共享实现接收它。
+const USAGE = 'usage: node scripts/effect-enforcer-daemon.mjs --config <isolated absolute path>'
+
 function parseConfigPath(argv) {
-  if (argv.length !== 2 || argv[0] !== '--config') {
-    throw new Error('usage: node scripts/effect-enforcer-daemon.mjs --config <isolated absolute path>')
-  }
-  if (!path.isAbsolute(argv[1])) throw new Error('--config must be an absolute isolated path')
-  return argv[1]
+  return parseExactConfigFlag(argv, USAGE)
 }
 
 function validateIpcRequest(request, config) {

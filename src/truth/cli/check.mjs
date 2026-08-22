@@ -7,24 +7,31 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { MESSAGES_ZH, parseFlags } from '../../shared/argv.mjs'
 import { toPosix } from '../../shared/text.mjs'
 import { schemaVersionHint } from '../../shared/schema-version.mjs'
 import { renderReportMd } from '../diagnostics/report.mjs'
 import { run } from '../pipeline.mjs'
 
+/**
+ * `--write` 是 `--write-generated-regions` 的兼容别名：两个字面量指向同一个
+ * key，不需要别名机制。`-h` 只有本 CLI 有 —— 四个兄弟脚本只认 `--help`，
+ * 那里 `-h` 仍然是未知参数，spec 逐个声明因此天然保留了这个差异。
+ */
+const SPEC = {
+  '--specs-root': { key: 'specsRoot' },
+  '--config': { key: 'config' },
+  '--report': { key: 'report' },
+  '--write-generated-regions': { key: 'write', flag: true },
+  '--write': { key: 'write', flag: true },
+  '--quiet': { key: 'quiet', flag: true },
+  '--help': { key: 'help', flag: true },
+  '-h': { key: 'help', flag: true },
+}
+
+/** @returns {{options: object} | {error: string}} */
 export function parseArgv(argv) {
-  const o = {}
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]
-    if (a === '--specs-root') o.specsRoot = argv[++i]
-    else if (a === '--config') o.config = argv[++i]
-    else if (a === '--report') o.report = argv[++i]
-    else if (a === '--write-generated-regions' || a === '--write') o.write = true
-    else if (a === '--quiet') o.quiet = true
-    else if (a === '--help' || a === '-h') o.help = true
-    else throw new Error(`未知参数：${a}`)
-  }
-  return o
+  return parseFlags(argv, SPEC, MESSAGES_ZH)
 }
 
 export const HELP = `用法：node check-spec-suite.mjs [选项]
@@ -39,7 +46,14 @@ export const HELP = `用法：node check-spec-suite.mjs [选项]
 `
 
 export async function main({ argv, fallbackConfigDir }) {
-  const opts = parseArgv(argv)
+  const parsed = parseArgv(argv)
+  // 合并前这一行在下面的 try **外面**，而入口是 `main(...).then(c => process.exit(c))`
+  // 且没有 `.catch` —— 于是一个拼错的参数会变成 unhandled promise rejection：
+  // 一整屏 stack trace，退出码交给 Node 决定。其余九个 CLI 都只打一行带前缀的
+  // 说明。这里沿用本文件"无法运行"那一档的写法与退出码 2（1 是"跑完了，有缺陷"），
+  // 未知参数确实属于"无法运行"。
+  if (parsed.error) { process.stderr.write(`检查器无法运行：${parsed.error}\n`); return 2 }
+  const opts = parsed.options
   if (opts.help) { process.stdout.write(HELP); return 0 }
   opts.fallbackConfig = path.join(fallbackConfigDir, 'spec-suite.config.json')
 
